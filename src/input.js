@@ -59,6 +59,9 @@ export function zoomableAxisInput(scaleOrDomain, {
   label = "",
   units = "",
   format = (d) => `${Math.round(d)}`,
+  // Scented-widget distribution drawn along the axis (Willett/Heer/Agrawala 2007):
+  //   scent: { values:number[], type:"histogram"|"violin", bins?:30, size?:24, color?:"#cbd5e1" }
+  scent = null,
 } = {}) {
   injectStyles();
   const horizontal = orient === "bottom" || orient === "top";
@@ -79,7 +82,9 @@ export function zoomableAxisInput(scaleOrDomain, {
   // d3 axis (decorative)
   const svg = container.append("svg").attr("class", "za-axis").attr("aria-hidden", "true")
     .attr("width", el.style.width).attr("height", el.style.height)
-    .style("position", "absolute").style("left", 0).style("top", 0).style("overflow", "visible");
+    .style("position", "absolute").style("left", 0).style("top", 0)
+    .style("overflow", "visible").style("pointer-events", "none");
+  if (scent && scent.values && scent.values.length) renderScent(svg, scent);
   const axisG = svg.append("g")
     .attr("transform", horizontal ? `translate(${margin},${orient === "top" ? margin : margin + thickness / 2})`
                                   : `translate(${orient === "right" ? margin : margin + thickness / 2},${margin})`);
@@ -138,16 +143,26 @@ export function zoomableAxisInput(scaleOrDomain, {
       value: val,
       handleR: R,
     });
+    // Keep the band grabbable even for a small selection: enforce a minimum
+    // along-axis hit length, centered between the handles. (Fixes pan not working
+    // when the range is small, esp. on the vertical axis.)
+    const minHit = 16;
+    let bStart = g.band.start, bLen = g.band.length;
+    if (bLen < minHit) {
+      const lo = Math.min(g.loPx, g.hiPx), hi = Math.max(g.loPx, g.hiPx);
+      bStart = (lo + hi) / 2 - minHit / 2;
+      bLen = minHit;
+    }
     if (horizontal) {
-      band.style.left = `${margin + g.band.start}px`;
+      band.style.left = `${margin + bStart}px`;
       band.style.top = `${margin + thickness / 2 - 6}px`;
-      band.style.width = `${g.band.length}px`;
+      band.style.width = `${bLen}px`;
       band.style.height = `12px`;
     } else {
       band.style.left = `${margin + thickness / 2 - 6}px`;
-      band.style.top = `${margin + g.band.start}px`;
+      band.style.top = `${margin + bStart}px`;
       band.style.width = `12px`;
-      band.style.height = `${g.band.length}px`;
+      band.style.height = `${bLen}px`;
     }
     // value badges on top of each handle
     const fmt = (v) => `${format(v)}${units ? " " + units : ""}`;
@@ -164,6 +179,42 @@ export function zoomableAxisInput(scaleOrDomain, {
       labelLo.style.left = tx; labelLo.style.top = `${margin + g.loPx}px`;
       labelHi.style.left = tx; labelHi.style.top = `${margin + g.hiPx}px`;
     }
+  }
+
+  // Draw a small histogram/violin of the data distribution along the axis (a
+  // "scented widget": embedded info-scent so users see where the data is dense).
+  function renderScent(svgSel, opts) {
+    const { values, type = "histogram", bins: nBins = 30, size = 24, color = "#cbd5e1" } = opts;
+    const [d0, d1] = scale.domain();
+    const w = (d1 - d0) / nBins;
+    const counts = new Array(nBins).fill(0);
+    for (const raw of values) {
+      const v = +raw;
+      if (raw == null || Number.isNaN(v) || v < d0 || v > d1) continue;
+      let i = Math.floor((v - d0) / w);
+      if (i >= nBins) i = nBins - 1;
+      if (i < 0) i = 0;
+      counts[i]++;
+    }
+    const maxN = Math.max(1, ...counts);
+    const g = svgSel.append("g").attr("class", "za-scent").attr(
+      "transform",
+      horizontal ? `translate(${margin},${margin + thickness / 2})` : `translate(${margin + thickness / 2},${margin})`
+    );
+    counts.forEach((n, i) => {
+      if (!n) return;
+      const a = scale(d0 + i * w);
+      const b = scale(d0 + (i + 1) * w);
+      const lo = Math.min(a, b);
+      const len = Math.max(1, Math.abs(b - a) - 1);
+      const h = (n / maxN) * size;
+      const r = g.append("rect").attr("fill", color).attr("fill-opacity", 0.75);
+      if (horizontal) {
+        r.attr("x", lo).attr("width", len).attr("y", type === "violin" ? -h / 2 : -h).attr("height", h);
+      } else {
+        r.attr("y", lo).attr("height", len).attr("x", type === "violin" ? -h / 2 : 0).attr("width", h);
+      }
+    });
   }
 
   function onInput(which, trusted) {

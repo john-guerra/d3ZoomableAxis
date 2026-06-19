@@ -76,6 +76,7 @@
     // x zoomable axis (bottom), full extent; selection = plot x-domain
     const xAxis = zoomableAxisInput(scaleLinear().domain(xExtent), {
       orient: "bottom", step: 1, length: plotW, value: xExtent, label: "Flipper length", units: "mm",
+      scent: { values: data.map(d => d[X]), type: "histogram", bins: 28 },
     });
     xAxis.style.position = "absolute"; xAxis.style.left = `${vAxis - 22}px`; xAxis.style.top = `${plotH}px`;
     xAxis.addEventListener("input", () => { x.domain(xAxis.value); draw(); report(); });
@@ -84,6 +85,7 @@
     // y zoomable axis (left), full extent; selection = plot y-domain
     const yAxis = zoomableAxisInput(scaleLinear().domain(yExtent), {
       orient: "left", step: 25, length: plotH, value: [3500, 6000], label: "Body mass", units: "g",
+      scent: { values: data.map(d => d[Y]), type: "violin", bins: 28 },
     });
     y.domain([3500, 6000]); // constrained from launch
     yAxis.style.position = "absolute"; yAxis.style.left = "0"; yAxis.style.top = `${-22}px`;
