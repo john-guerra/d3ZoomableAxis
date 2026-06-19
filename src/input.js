@@ -4,6 +4,7 @@ import { axisBottom, axisTop, axisLeft, axisRight } from "d3-axis";
 import { dispatch } from "d3-dispatch";
 import ReactiveWidget from "reactive-widget-helper";
 import { snapRange } from "./snap.js";
+import { axisGeometry } from "./geometry.js";
 
 const AXIS = { bottom: axisBottom, top: axisTop, left: axisLeft, right: axisRight };
 
@@ -88,16 +89,26 @@ export function zoomableAxisInput(scaleOrDomain, {
   const band = container.append("div").attr("class", "za-selected").node();
 
   // two native range inputs
+  const H = 16; // input/thumb height; kept fixed so the rotate math is exact
   const mkInput = (which) => {
     const input = document.createElement("input");
     input.type = "range";
     input.min = dMin; input.max = dMax; input.step = step || "any";
     input.setAttribute("aria-label", `${which === "lo" ? "Minimum" : "Maximum"} ${label || "value"}`);
-    if (!horizontal) input.style.writingMode = "vertical-lr"; // native vertical (modern browsers)
-    input.style[horizontal ? "width" : "height"] = `${length}px`;
-    input.style.left = `${margin}px`;
-    input.style.top = `${margin + (horizontal ? thickness / 2 - 8 : 0)}px`;
-    if (!horizontal) { input.style.left = `${margin + thickness / 2 - 8}px`; input.style.top = `${margin}px`; input.setAttribute("orient", "vertical"); }
+    input.setAttribute("aria-orientation", horizontal ? "horizontal" : "vertical");
+    // Always a HORIZONTAL input internally (reliable thumb positioning); vertical is
+    // produced by rotating it -90deg so min->bottom, max->top (matches the scale range).
+    input.style.width = `${length}px`;
+    input.style.height = `${H}px`;
+    if (horizontal) {
+      input.style.left = `${margin}px`;
+      input.style.top = `${margin + thickness / 2 - H / 2}px`;
+    } else {
+      input.style.transformOrigin = "center center";
+      input.style.transform = "rotate(-90deg)";
+      input.style.left = `${margin + thickness / 2 - length / 2}px`;
+      input.style.top = `${margin + length / 2 - H / 2}px`;
+    }
     container.node().appendChild(input);
     input.addEventListener("input", (e) => onInput(which, e.isTrusted));
     return input;
@@ -119,20 +130,24 @@ export function zoomableAxisInput(scaleOrDomain, {
     loInput.value = val[0];
     hiInput.value = val[1];
     setValuetext();
-    // position the pan band so it fits BETWEEN the handles (inset by the handle radius)
     const R = 8; // handle radius (matches the 16px thumb)
-    const p0 = scale(val[0]), p1 = scale(val[1]);
-    const a = Math.min(p0, p1), b = Math.max(p0, p1);
+    // along-axis geometry (handles + band) from the tested pure module
+    const g = axisGeometry({
+      domain: scale.domain(),
+      range: horizontal ? [0, length] : [length, 0],
+      value: val,
+      handleR: R,
+    });
     if (horizontal) {
-      band.style.left = `${margin + a + R}px`;
+      band.style.left = `${margin + g.band.start}px`;
       band.style.top = `${margin + thickness / 2 - 6}px`;
-      band.style.width = `${Math.max(0, b - a - 2 * R)}px`;
+      band.style.width = `${g.band.length}px`;
       band.style.height = `12px`;
     } else {
       band.style.left = `${margin + thickness / 2 - 6}px`;
-      band.style.top = `${margin + a + R}px`;
+      band.style.top = `${margin + g.band.start}px`;
       band.style.width = `12px`;
-      band.style.height = `${Math.max(0, b - a - 2 * R)}px`;
+      band.style.height = `${g.band.length}px`;
     }
     // value badges on top of each handle
     const fmt = (v) => `${format(v)}${units ? " " + units : ""}`;
@@ -141,13 +156,13 @@ export function zoomableAxisInput(scaleOrDomain, {
     if (horizontal) {
       labelLo.style.transform = labelHi.style.transform = "translate(-50%, 0)";
       const ty = `${margin + thickness / 2 - R - 18}px`;
-      labelLo.style.left = `${margin + p0}px`; labelLo.style.top = ty;
-      labelHi.style.left = `${margin + p1}px`; labelHi.style.top = ty;
+      labelLo.style.left = `${margin + g.loPx}px`; labelLo.style.top = ty;
+      labelHi.style.left = `${margin + g.hiPx}px`; labelHi.style.top = ty;
     } else {
       labelLo.style.transform = labelHi.style.transform = "translate(0, -50%)";
       const tx = `${margin + thickness / 2 + R + 6}px`;
-      labelLo.style.left = tx; labelLo.style.top = `${margin + p0}px`;
-      labelHi.style.left = tx; labelHi.style.top = `${margin + p1}px`;
+      labelLo.style.left = tx; labelLo.style.top = `${margin + g.loPx}px`;
+      labelHi.style.left = tx; labelHi.style.top = `${margin + g.hiPx}px`;
     }
   }
 

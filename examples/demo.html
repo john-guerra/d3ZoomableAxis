@@ -83,8 +83,9 @@
 
     // y zoomable axis (left), full extent; selection = plot y-domain
     const yAxis = zoomableAxisInput(scaleLinear().domain(yExtent), {
-      orient: "left", step: 25, length: plotH, value: yExtent, label: "Body mass", units: "g",
+      orient: "left", step: 25, length: plotH, value: [3500, 6000], label: "Body mass", units: "g",
     });
+    y.domain([3500, 6000]); // constrained from launch
     yAxis.style.position = "absolute"; yAxis.style.left = "0"; yAxis.style.top = `${-22}px`;
     yAxis.addEventListener("input", () => { y.domain(yAxis.value); draw(); report(); });
     wrap.node().appendChild(yAxis);
