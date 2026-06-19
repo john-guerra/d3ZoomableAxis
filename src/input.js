@@ -147,15 +147,18 @@ export function zoomableAxisInput(scaleOrDomain, {
     //
     //   Vertical axis ("horizontal half-circles"):
     //     flat edge = HORIZONTAL line at y=px (x from -HR to +HR)
-    //     lo (large py, near bottom) → bump DOWN (CW  sweep=1, arcs through y>px)
-    //     hi (small py, near top)   → bump UP   (CCW sweep=0, arcs through y<px)
+    //     Arc endpoints: A=(-HR,py) at 180°, B=(HR,py) at 0° from center (0,py).
+    //     CCW (sweep=0) from 180° → passes through 90° (DOWN in y-down SVG) → bump DOWN.
+    //     CW  (sweep=1) from 180° → passes through 270° (UP in y-down SVG)  → bump UP.
+    //     lo (large py, near bottom) → bump DOWN (CCW sweep=0)
+    //     hi (small py, near top)   → bump UP   (CW  sweep=1)
     let arcD, lx1, ly1, lx2, ly2;
     if (horizontal) {
       const sweep = which === "lo" ? 0 : 1;
       arcD = `M ${px} ${-HR} A ${HR} ${HR} 0 0 ${sweep} ${px} ${HR} Z`;
       lx1 = px; ly1 = -HR; lx2 = px; ly2 = HR; // flat edge = vertical value marker
     } else {
-      const sweep = which === "lo" ? 1 : 0;
+      const sweep = which === "lo" ? 0 : 1;
       arcD = `M ${-HR} ${px} A ${HR} ${HR} 0 0 ${sweep} ${HR} ${px} Z`;
       lx1 = -HR; ly1 = px; lx2 = HR; ly2 = px; // flat edge = horizontal value marker
     }
