@@ -14,6 +14,11 @@ It is built in the **d3 module idiom** (Bostock/Fil): a factory returning a func
 a thin **reactive-widget** wrapper so it drops into Observable `view()` and the reactivewidgets.org
 ecosystem.
 
+**Accessibility is a first-class requirement** (not a retrofit): full keyboard control, screen-reader
+support, and **standard HTML form inputs** under the hood. This is the decisive reason the interaction
+layer is built from native `<input type="range">` elements rather than an SVG `d3-brush` (which is not
+focusable, keyboard-operable, or announced). See the Accessibility section.
+
 ## API
 
 ### Core component (`src/zoomableAxis.js`)
@@ -47,16 +52,54 @@ step; domain endpoints stay reachable when step doesn't divide the span. No d3/D
 
 ```
 zoomableAxis(orient, scale)
-├── d3-axis     → ticks + labels + domain line for `scale`
-├── d3-brush    → handles + selection band along the axis (pixels)
-├── d3-scale    → scale.invert(px) <-> scale(data)
-├── snap.js     → order / clamp / step-snap
+├── d3-axis     → ticks + labels + domain line for `scale`  (decorative; aria-hidden)
+├── 2× <input type="range">  → the accessible dual handles (lo + hi), overlaid on the axis
+│       • native role=slider, focusable, keyboard, screen-reader announced
+│       • shared min/max/step from scale.domain()/step; clamp lo ≤ hi on input
+│       • aria-label per thumb + aria-valuetext (formatted value + units)
+├── d3-scale    → map data <-> pixels for positioning the inputs over the axis
+├── snap.js     → order / clamp / step-snap (mirrors native step)
 └── d3-dispatch → start / input / end  (+ .on copy/forward)
 ```
+
+The native inputs are the **source of truth and the a11y surface**; the d3 axis is the visual
+ticks/labels layer behind them. (Earlier scaffolding used `d3-brush`; replaced for accessibility.)
 
 See [d3-api-style.md](./d3-api-style.md) for the idiom, and
 [history-direct-manipulation-rangesliders.md](./history-direct-manipulation-rangesliders.md) for the
 Shneiderman/Plaisant dynamic-query lineage that motivates the live, tightly-coupled feedback.
+
+## Accessibility (first-class)
+
+Built on **two native `<input type="range">`** (a "lo" and a "hi" thumb) so the control is
+accessible by construction:
+
+- **Keyboard** (free from native inputs, plus our additions): `Tab` focuses each thumb;
+  `←/↓` and `→/↑` nudge by `step`; `PageUp`/`PageDown` by a larger step; `Home`/`End` jump to that
+  thumb's allowed bound. Each thumb is clamped so `lo ≤ hi`.
+- **Screen readers:** each input is announced as a slider with an accessible **name**
+  (`aria-label`, e.g. "Minimum Semanas" / "Maximum Semanas"), `min`/`max`/`now` (native), and a
+  human-readable **`aria-valuetext`** (e.g. "30 weeks" / "1,500 g"). The pair is wrapped in a
+  labelled `role="group"` (e.g. "Semanas range").
+- **Standard HTML inputs:** real form controls — they participate in forms, inherit OS slider
+  styling/high-contrast, respect `prefers-reduced-motion`, and need no custom ARIA-slider
+  reimplementation.
+- **Pointer:** the two range inputs are overlaid on the same track; `pointer-events` is toggled so
+  the thumb nearer the cursor is the grabbable one (the standard accessible dual-range technique).
+  Thumbs are styled to read as handles on the axis; the track is transparent so the axis line and
+  ticks show through.
+- **Visible focus** ring on the focused thumb; hit targets ≥ 24px (touch/WCAG target size).
+- **Vertical orientation:** native vertical range via CSS `writing-mode: vertical-lr` (modern
+  Chromium/Firefox/Safari); horizontal is the primary, fully-supported path. (Noted caveat below.)
+
+Maps directly onto the direct-manipulation best practices in
+[history-direct-manipulation-rangesliders.md](./history-direct-manipulation-rangesliders.md):
+immediate feedback, reversibility, visible state, tight coupling — now also operable without a mouse.
+
+**Tradeoff vs the old brush approach:** native inputs don't natively support dragging the *range
+body* to pan (DM "Principle 3"). Options: (a) v1 = move both bounds via keyboard / two drags;
+(b) add an optional pointer-only drag-to-pan region (mouse enhancement, not required for a11y).
+Recommend (a) now, (b) later.
 
 ## Packaging
 
@@ -85,5 +128,7 @@ Shneiderman/Plaisant dynamic-query lineage that motivates the live, tightly-coup
 
 1. Package name `@john-guerra/d3-zoomable-axis` (npm-lowercase; folder `d3ZoomableAxis`). OK?
 2. Live-drag event name: `input` (chosen, DOM/reactive cohesion) vs `change`.
-3. Interaction: reuse `d3-brush` (chosen for v1) vs hand-rolled handles.
+3. ~~Interaction: d3-brush vs hand-rolled~~ → **resolved: native `<input type="range">`** for full accessibility.
 4. Ship a minimal default stylesheet for the handles, or leave unstyled with documented classes?
+5. Range-body **drag-to-pan** in v1 (mouse-only enhancement on top of accessible inputs) or defer?
+6. Vertical orientation in v1, or horizontal-only first (native vertical range has browser caveats)?

@@ -7,6 +7,10 @@ the zoom control, so it lines up with your chart by construction (no pixel-offse
 
 > npm: `@john-guerra/d3-zoomable-axis` · status: **early (0.0.x)**
 
+**Accessible by design.** The handles are real `<input type="range">` elements, so the control is
+keyboard-operable (arrows / Page / Home / End), screen-reader announced (named sliders with
+`aria-valuetext`), and works as standard HTML form inputs — no custom ARIA-slider reimplementation.
+
 Two API layers:
 
 1. **Core d3 component** — the [d3 idiom](./docs/d3-api-style.md): a factory applied via
