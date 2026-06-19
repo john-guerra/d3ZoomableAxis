@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>d3-zoomable-axis — demo</title>
+  <script type="importmap">
+  {
+    "imports": {
+      "d3-selection": "https://esm.sh/d3-selection@3",
+      "d3-scale": "https://esm.sh/d3-scale@4",
+      "d3-axis": "https://esm.sh/d3-axis@3",
+      "d3-brush": "https://esm.sh/d3-brush@3",
+      "d3-dispatch": "https://esm.sh/d3-dispatch@3",
+      "reactive-widget-helper": "https://esm.sh/reactive-widget-helper@0.0.3"
+    }
+  }
+  </script>
+  <style>
+    body { font: 14px/1.5 system-ui, sans-serif; margin: 2rem; max-width: 900px; }
+    .row { display: flex; gap: 2rem; align-items: flex-start; margin: 1rem 0; }
+    .out { font-family: monospace; background: #f4f4f4; padding: .5rem; border-radius: 4px; }
+    h2 { margin-top: 2rem; }
+    .hint { color: #555; }
+  </style>
+</head>
+<body>
+  <h1>d3-zoomable-axis</h1>
+  <p class="hint">Tab to a handle, then use ← → / Home / End / PageUp / PageDown. Drag the shaded
+  band to pan. Turn on a screen reader to hear the named sliders + value text.</p>
+
+  <h2>Variant A — native <code>&lt;input type="range"&gt;</code> (accessible)</h2>
+  <div class="row">
+    <div>
+      <div class="hint">Horizontal (weeks)</div>
+      <div id="a-weeks"></div>
+    </div>
+    <div>
+      <div class="hint">Vertical (weight)</div>
+      <div id="a-weight"></div>
+    </div>
+  </div>
+  <div class="out" id="a-out">—</div>
+
+  <script type="module">
+    import { scaleLinear } from "d3-scale";
+    import { zoomableAxisInput } from "../src/input.js";
+
+    const out = document.getElementById("a-out");
+    const state = { weeks: null, weight: null };
+    const show = () => out.textContent = `weeks = [${state.weeks}]   weight = [${state.weight}]`;
+
+    const weeks = zoomableAxisInput(scaleLinear().domain([24, 92]), {
+      orient: "bottom", step: 1, length: 600, value: [30, 60], label: "Semanas", units: "weeks",
+    });
+    weeks.addEventListener("input", () => { state.weeks = weeks.value; show(); });
+    document.getElementById("a-weeks").appendChild(weeks);
+    state.weeks = weeks.value;
+
+    const weight = zoomableAxisInput(scaleLinear().domain([0, 9000]), {
+      orient: "left", step: 100, length: 360, value: [0, 5000], label: "Peso", units: "g",
+    });
+    weight.addEventListener("input", () => { state.weight = weight.value; show(); });
+    document.getElementById("a-weight").appendChild(weight);
+    state.weight = weight.value;
+
+    show();
+    window.__demo = { weeks, weight };
+  </script>
+</body>
+</html>
