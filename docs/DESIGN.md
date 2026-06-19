@@ -124,6 +124,31 @@ Recommend (a) now, (b) later.
 5. ⏳ Adopt in Explorador Canguro: replace the overlay sliders; ideally have TimeWidget expose its
    x/y scales (and optionally suppress its own axes) so the zoomable axes align by shared scale.
 
+## Handoff — in-progress / next (2026-06-19)
+
+Done & committed (working, 13/13 tests, NOT published): native-input accessible axis
+(keyboard/SR/value badges), both orientations (vertical via rotate(-90)), drag-to-pan
+(fixed incl. small ranges + correct signed delta), tested geometry, scented widget
+(histogram bars + mirrored-bars violin) with in-view color-coding + `side` (draw outside),
+penguins scatter demo.
+
+Remaining axis tasks (decisions already made — just implement):
+1. **Smooth violin via `fast-kde`** (`density1d`) — user chose fast-kde to match
+   `@john-guerra/violin-plot` (resource in `resources/violin-plot.tgz`; its ViolinPlot uses
+   `kde.density1d(Y,{bandwidth,bins})`). Render a smooth symmetric area `<path>`, two-tone by
+   selection via a clipPath rect moved in `paintScent`. Add `fast-kde` to deps + demo importmap.
+   (An attempt was reverted to keep the tree clean — redo cleanly.)
+2. **Mirrored-bars violin as a config option** — keep current mirrored bars selectable, e.g.
+   `scent.style: "kde" | "bars"` (default "kde").
+3. **Thin-line band when scent is on** — draw the selection as a thin line on the domain line
+   (not a thick band) with a still-visible/grabbable draggable area (subtle translucent hit zone
+   + a sibling thin line). Gate on `hasScent`.
+4. **Demo: axis adjacent to the scatterplot** — position the x/y axes flush against the plot
+   (like a normal scatterplot's axes), no gap.
+
+Scent drawing API in use: raw d3-selection SVG (`<rect>`/`<path>`) positioned by the component's
+d3 `scale`; violin density → `fast-kde` (decision).
+
 ## Open decisions
 
 1. Package name `@john-guerra/d3-zoomable-axis` (npm-lowercase; folder `d3ZoomableAxis`). OK?
