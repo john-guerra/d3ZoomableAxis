@@ -34,6 +34,10 @@ function injectStyles() {
 .zoomable-axis-input input[type=range]:focus-visible::-moz-range-thumb { outline: 2px solid var(--za-accent); outline-offset: 2px; }
 .zoomable-axis-input .za-selected { position: absolute; background: var(--za-accent); opacity: .25; cursor: grab; }
 .zoomable-axis-input .za-selected:active { cursor: grabbing; }
+.zoomable-axis-input .za-value {
+  position: absolute; pointer-events: none; font: 600 11px/1 sans-serif;
+  background: var(--za-accent); color: #fff; padding: 2px 5px; border-radius: 3px; white-space: nowrap;
+}
 `;
   const s = document.createElement("style");
   s.textContent = css;
@@ -101,6 +105,11 @@ export function zoomableAxisInput(scaleOrDomain, {
   const loInput = mkInput("lo");
   const hiInput = mkInput("hi");
 
+  // live value badges shown on top of each handle
+  const mkLabel = () => { const d = document.createElement("div"); d.className = "za-value"; container.node().appendChild(d); return d; };
+  const labelLo = mkLabel();
+  const labelHi = mkLabel();
+
   function setValuetext() {
     loInput.setAttribute("aria-valuetext", `${format(val[0])}${units ? " " + units : ""}`);
     hiInput.setAttribute("aria-valuetext", `${format(val[1])}${units ? " " + units : ""}`);
@@ -110,19 +119,35 @@ export function zoomableAxisInput(scaleOrDomain, {
     loInput.value = val[0];
     hiInput.value = val[1];
     setValuetext();
-    // position the pan band between the thumbs
+    // position the pan band so it fits BETWEEN the handles (inset by the handle radius)
+    const R = 8; // handle radius (matches the 16px thumb)
     const p0 = scale(val[0]), p1 = scale(val[1]);
     const a = Math.min(p0, p1), b = Math.max(p0, p1);
     if (horizontal) {
-      band.style.left = `${margin + a}px`;
+      band.style.left = `${margin + a + R}px`;
       band.style.top = `${margin + thickness / 2 - 6}px`;
-      band.style.width = `${b - a}px`;
+      band.style.width = `${Math.max(0, b - a - 2 * R)}px`;
       band.style.height = `12px`;
     } else {
       band.style.left = `${margin + thickness / 2 - 6}px`;
-      band.style.top = `${margin + a}px`;
+      band.style.top = `${margin + a + R}px`;
       band.style.width = `12px`;
-      band.style.height = `${b - a}px`;
+      band.style.height = `${Math.max(0, b - a - 2 * R)}px`;
+    }
+    // value badges on top of each handle
+    const fmt = (v) => `${format(v)}${units ? " " + units : ""}`;
+    labelLo.textContent = fmt(val[0]);
+    labelHi.textContent = fmt(val[1]);
+    if (horizontal) {
+      labelLo.style.transform = labelHi.style.transform = "translate(-50%, 0)";
+      const ty = `${margin + thickness / 2 - R - 18}px`;
+      labelLo.style.left = `${margin + p0}px`; labelLo.style.top = ty;
+      labelHi.style.left = `${margin + p1}px`; labelHi.style.top = ty;
+    } else {
+      labelLo.style.transform = labelHi.style.transform = "translate(0, -50%)";
+      const tx = `${margin + thickness / 2 + R + 6}px`;
+      labelLo.style.left = tx; labelLo.style.top = `${margin + p0}px`;
+      labelHi.style.left = tx; labelHi.style.top = `${margin + p1}px`;
     }
   }
 

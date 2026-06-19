@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>d3-zoomable-axis — demo</title>
+  <title>d3-zoomable-axis — penguins demo</title>
   <script type="importmap">
   {
     "imports": {
@@ -18,54 +18,83 @@
   </script>
   <style>
     body { font: 14px/1.5 system-ui, sans-serif; margin: 2rem; max-width: 900px; }
-    .row { display: flex; gap: 2rem; align-items: flex-start; margin: 1rem 0; }
-    .out { font-family: monospace; background: #f4f4f4; padding: .5rem; border-radius: 4px; }
-    h2 { margin-top: 2rem; }
     .hint { color: #555; }
+    #plotWrap { position: relative; margin-top: 1rem; }
+    .axis text { font: 10px sans-serif; }
   </style>
 </head>
 <body>
-  <h1>d3-zoomable-axis</h1>
-  <p class="hint">Tab to a handle, then use ← → / Home / End / PageUp / PageDown. Drag the shaded
-  band to pan. Turn on a screen reader to hear the named sliders + value text.</p>
+  <h1>d3-zoomable-axis — zoom a penguins scatterplot</h1>
+  <p class="hint">Drag a handle (or Tab to it and use ← → / Home / End), or drag the shaded band to
+  pan. The scatterplot zooms live to the selected x (flipper length) and y (body mass) window —
+  direct manipulation, tightly coupled.</p>
 
-  <h2>Variant A — native <code>&lt;input type="range"&gt;</code> (accessible)</h2>
-  <div class="row">
-    <div>
-      <div class="hint">Horizontal (weeks)</div>
-      <div id="a-weeks"></div>
-    </div>
-    <div>
-      <div class="hint">Vertical (weight)</div>
-      <div id="a-weight"></div>
-    </div>
-  </div>
-  <div class="out" id="a-out">—</div>
+  <div id="plotWrap"></div>
+  <p class="out hint" id="out">—</p>
 
   <script type="module">
+    import { select } from "d3-selection";
     import { scaleLinear } from "d3-scale";
     import { zoomableAxisInput } from "../src/input.js";
 
-    const out = document.getElementById("a-out");
-    const state = { weeks: null, weight: null };
-    const show = () => out.textContent = `weeks = [${state.weeks}]   weight = [${state.weight}]`;
+    const X = "Flipper Length (mm)", Y = "Body Mass (g)";
+    const COLORS = { "Adelie": "#ff8c00", "Chinstrap": "#9932cc", "Gentoo": "#008080" };
+    const species = (d) => (d.Species || "").split(" ")[0];
 
-    const weeks = zoomableAxisInput(scaleLinear().domain([24, 92]), {
-      orient: "bottom", step: 1, length: 600, value: [30, 60], label: "Semanas", units: "weeks",
+    const raw = await fetch("https://cdn.jsdelivr.net/npm/vega-datasets@2/data/penguins.json").then(r => r.json());
+    const data = raw.filter(d => d[X] != null && d[Y] != null);
+
+    const plotW = 460, plotH = 360, vAxis = 64, hAxis = 56;
+    const xExtent = [Math.min(...data.map(d => d[X])), Math.max(...data.map(d => d[X]))];
+    const yExtent = [Math.min(...data.map(d => d[Y])), Math.max(...data.map(d => d[Y]))];
+
+    // plot scales (their DOMAIN is the zoom window; starts at full extent)
+    const x = scaleLinear().domain(xExtent).range([0, plotW]);
+    const y = scaleLinear().domain(yExtent).range([plotH, 0]);
+
+    const wrap = select("#plotWrap")
+      .style("width", `${vAxis + plotW + 30}px`)
+      .style("height", `${plotH + hAxis + 30}px`);
+
+    // scatterplot
+    const svg = wrap.append("svg")
+      .style("position", "absolute").style("left", `${vAxis}px`).style("top", "0")
+      .attr("width", plotW + 20).attr("height", plotH + 20);
+    svg.append("clipPath").attr("id", "plotClip").append("rect").attr("width", plotW).attr("height", plotH);
+    const gPts = svg.append("g").attr("clip-path", "url(#plotClip)");
+    svg.append("rect").attr("width", plotW).attr("height", plotH).attr("fill", "none").attr("stroke", "#ddd");
+
+    function draw() {
+      const c = gPts.selectAll("circle").data(data);
+      c.join("circle")
+        .attr("r", 3.5).attr("fill-opacity", 0.75)
+        .attr("fill", d => COLORS[species(d)] || "#888")
+        .attr("cx", d => x(d[X])).attr("cy", d => y(d[Y]));
+    }
+    draw();
+
+    // x zoomable axis (bottom), full extent; selection = plot x-domain
+    const xAxis = zoomableAxisInput(scaleLinear().domain(xExtent), {
+      orient: "bottom", step: 1, length: plotW, value: xExtent, label: "Flipper length", units: "mm",
     });
-    weeks.addEventListener("input", () => { state.weeks = weeks.value; show(); });
-    document.getElementById("a-weeks").appendChild(weeks);
-    state.weeks = weeks.value;
+    xAxis.style.position = "absolute"; xAxis.style.left = `${vAxis - 22}px`; xAxis.style.top = `${plotH}px`;
+    xAxis.addEventListener("input", () => { x.domain(xAxis.value); draw(); report(); });
+    wrap.node().appendChild(xAxis);
 
-    const weight = zoomableAxisInput(scaleLinear().domain([0, 9000]), {
-      orient: "left", step: 100, length: 360, value: [0, 5000], label: "Peso", units: "g",
+    // y zoomable axis (left), full extent; selection = plot y-domain
+    const yAxis = zoomableAxisInput(scaleLinear().domain(yExtent), {
+      orient: "left", step: 25, length: plotH, value: yExtent, label: "Body mass", units: "g",
     });
-    weight.addEventListener("input", () => { state.weight = weight.value; show(); });
-    document.getElementById("a-weight").appendChild(weight);
-    state.weight = weight.value;
+    yAxis.style.position = "absolute"; yAxis.style.left = "0"; yAxis.style.top = `${-22}px`;
+    yAxis.addEventListener("input", () => { y.domain(yAxis.value); draw(); report(); });
+    wrap.node().appendChild(yAxis);
 
-    show();
-    window.__demo = { weeks, weight };
+    const out = document.getElementById("out");
+    const report = () => out.textContent =
+      `x (flipper) = [${xAxis.value.map(v=>v.toFixed(0))}] mm   ·   y (mass) = [${yAxis.value.map(v=>v.toFixed(0))}] g   ·   ${data.length} penguins`;
+    report();
+
+    window.__demo = { xAxis, yAxis, x, y };
   </script>
 </body>
 </html>
