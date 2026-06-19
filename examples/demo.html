@@ -12,6 +12,7 @@
       "d3-axis": "https://esm.sh/d3-axis@3",
       "d3-brush": "https://esm.sh/d3-brush@3",
       "d3-dispatch": "https://esm.sh/d3-dispatch@3",
+      "fast-kde": "https://esm.sh/fast-kde@0.2.2",
       "reactive-widget-helper": "https://esm.sh/reactive-widget-helper@0.0.3"
     }
   }
@@ -45,6 +46,9 @@
     const data = raw.filter(d => d[X] != null && d[Y] != null);
 
     const plotW = 460, plotH = 360, vAxis = 64, hAxis = 56;
+    // The zoomable axis draws its domain line at (margin + thickness/2) into the
+    // component; offset each axis by that so the line sits flush on the plot edge.
+    const AXMARGIN = 22, AXTHICK = 44, axLine = AXMARGIN + AXTHICK / 2; // = 44
     const xExtent = [Math.min(...data.map(d => d[X])), Math.max(...data.map(d => d[X]))];
     const yExtent = [Math.min(...data.map(d => d[Y])), Math.max(...data.map(d => d[Y]))];
 
@@ -59,6 +63,10 @@
     // scatterplot
     const svg = wrap.append("svg")
       .style("position", "absolute").style("left", `${vAxis}px`).style("top", "0")
+      // Paint the scatter ABOVE the axes (so points sit on top of the scent
+      // violin/histogram). pointer-events:none keeps the axis handles/drag —
+      // which live underneath at the plot edges — fully interactive.
+      .style("z-index", "2").style("pointer-events", "none")
       .attr("width", plotW + 20).attr("height", plotH + 20);
     svg.append("clipPath").attr("id", "plotClip").append("rect").attr("width", plotW).attr("height", plotH);
     const gPts = svg.append("g").attr("clip-path", "url(#plotClip)");
@@ -78,7 +86,8 @@
       orient: "bottom", step: 1, length: plotW, value: xExtent, label: "Flipper length", units: "mm",
       scent: { values: data.map(d => d[X]), type: "histogram", bins: 28 },
     });
-    xAxis.style.position = "absolute"; xAxis.style.left = `${vAxis - 22}px`; xAxis.style.top = `${plotH}px`;
+    // flush against the plot's bottom edge: axis line lands at y = plotH
+    xAxis.style.position = "absolute"; xAxis.style.left = `${vAxis - AXMARGIN}px`; xAxis.style.top = `${plotH - axLine}px`;
     xAxis.addEventListener("input", () => { x.domain(xAxis.value); draw(); report(); });
     wrap.node().appendChild(xAxis);
 
@@ -88,7 +97,8 @@
       scent: { values: data.map(d => d[Y]), type: "violin", bins: 28 },
     });
     y.domain([3500, 6000]); // constrained from launch
-    yAxis.style.position = "absolute"; yAxis.style.left = "0"; yAxis.style.top = `${-22}px`;
+    // flush against the plot's left edge: axis line lands at x = vAxis
+    yAxis.style.position = "absolute"; yAxis.style.left = `${vAxis - axLine}px`; yAxis.style.top = `${-AXMARGIN}px`;
     yAxis.addEventListener("input", () => { y.domain(yAxis.value); draw(); report(); });
     wrap.node().appendChild(yAxis);
 
@@ -98,6 +108,91 @@
     report();
 
     window.__demo = { xAxis, yAxis, x, y };
+  </script>
+
+  <!-- ─── Variant 2: same axes WITHOUT the scented distribution ─── -->
+  <h2 style="margin-top:3rem">Without scent</h2>
+  <p class="hint">Same axes and interaction, no distribution drawn along them.</p>
+  <div id="plotWrap2" style="position:relative;margin-top:1rem"></div>
+  <p class="hint" id="out2">—</p>
+  <script type="module">
+    import { select } from "d3-selection";
+    import { scaleLinear } from "d3-scale";
+    import { zoomableAxisInput } from "../src/input.js";
+
+    const X = "Flipper Length (mm)", Y = "Body Mass (g)";
+    const COLORS = { "Adelie": "#ff8c00", "Chinstrap": "#9932cc", "Gentoo": "#008080" };
+    const species = (d) => (d.Species || "").split(" ")[0];
+    const raw = await fetch("https://cdn.jsdelivr.net/npm/vega-datasets@2/data/penguins.json").then(r => r.json());
+    const data = raw.filter(d => d[X] != null && d[Y] != null);
+
+    const plotW = 460, plotH = 360, vAxis = 64;
+    const AXMARGIN = 22, AXTHICK = 44, axLine = AXMARGIN + AXTHICK / 2;
+    const xExtent = [Math.min(...data.map(d => d[X])), Math.max(...data.map(d => d[X]))];
+    const yExtent = [Math.min(...data.map(d => d[Y])), Math.max(...data.map(d => d[Y]))];
+    const x = scaleLinear().domain(xExtent).range([0, plotW]);
+    const y = scaleLinear().domain(yExtent).range([plotH, 0]);
+
+    const wrap = select("#plotWrap2").style("width", `${vAxis + plotW + 30}px`).style("height", `${plotH + 80}px`);
+    const svg = wrap.append("svg")
+      .style("position","absolute").style("left",`${vAxis}px`).style("top","0")
+      .style("z-index","2").style("pointer-events","none")
+      .attr("width", plotW + 20).attr("height", plotH + 20);
+    svg.append("clipPath").attr("id","plotClip2").append("rect").attr("width",plotW).attr("height",plotH);
+    const gPts = svg.append("g").attr("clip-path","url(#plotClip2)");
+    svg.append("rect").attr("width",plotW).attr("height",plotH).attr("fill","none").attr("stroke","#ddd");
+    const draw = () => gPts.selectAll("circle").data(data).join("circle")
+      .attr("r",3.5).attr("fill-opacity",.75).attr("fill",d=>COLORS[species(d)]||"#888")
+      .attr("cx",d=>x(d[X])).attr("cy",d=>y(d[Y]));
+    draw();
+
+    const xAxis = zoomableAxisInput(scaleLinear().domain(xExtent), {
+      orient:"bottom", step:1, length:plotW, value:xExtent, label:"Flipper length", units:"mm"
+    });
+    xAxis.style.position="absolute"; xAxis.style.left=`${vAxis-AXMARGIN}px`; xAxis.style.top=`${plotH-axLine}px`;
+    xAxis.addEventListener("input", () => { x.domain(xAxis.value); draw(); document.getElementById("out2").textContent=`x=[${xAxis.value.map(v=>v.toFixed(0))}]`; });
+    wrap.node().appendChild(xAxis);
+
+    const yAxis = zoomableAxisInput(scaleLinear().domain(yExtent), {
+      orient:"left", step:25, length:plotH, value:[3500,6000], label:"Body mass", units:"g"
+    });
+    y.domain([3500,6000]);
+    yAxis.style.position="absolute"; yAxis.style.left=`${vAxis-axLine}px`; yAxis.style.top=`${-AXMARGIN}px`;
+    yAxis.addEventListener("input", () => { y.domain(yAxis.value); draw(); });
+    wrap.node().appendChild(yAxis);
+  </script>
+
+  <!-- ─── Variant 3: plain native range sliders (baseline reference) ─── -->
+  <h2 style="margin-top:3rem">Plain range sliders (baseline)</h2>
+  <p class="hint">Unadorned native <code>&lt;input type=range&gt;</code> for comparison. No axis, no scent.</p>
+  <div id="plainWrap" style="margin-top:1rem;display:flex;flex-direction:column;gap:1rem">
+    <label style="display:flex;align-items:center;gap:.5rem">
+      Flipper lo
+      <input id="pXlo" type="range" min="170" max="235" value="170" step="1">
+      <span id="pXloV">170</span> mm
+    </label>
+    <label style="display:flex;align-items:center;gap:.5rem">
+      Flipper hi
+      <input id="pXhi" type="range" min="170" max="235" value="235" step="1">
+      <span id="pXhiV">235</span> mm
+    </label>
+    <label style="display:flex;align-items:center;gap:.5rem">
+      Mass lo
+      <input id="pYlo" type="range" min="2700" max="6300" value="2700" step="25">
+      <span id="pYloV">2700</span> g
+    </label>
+    <label style="display:flex;align-items:center;gap:.5rem">
+      Mass hi
+      <input id="pYhi" type="range" min="2700" max="6300" value="6300" step="25">
+      <span id="pYhiV">6300</span> g
+    </label>
+  </div>
+  <script>
+    ["pXlo","pXhi","pYlo","pYhi"].forEach(id => {
+      const el = document.getElementById(id);
+      const lbl = document.getElementById(id + "V");
+      el.addEventListener("input", () => lbl.textContent = el.value);
+    });
   </script>
 </body>
 </html>
