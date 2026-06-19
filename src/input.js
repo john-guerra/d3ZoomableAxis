@@ -249,23 +249,34 @@ export function zoomableAxisInput(scaleOrDomain, {
     if (trusted) { listeners.call("input", el, val.slice()); widget.setValue(val.slice()); }
   }
 
-  // drag-to-pan: move both bounds together, preserving the window width
+  // drag-to-pan: move both bounds together, preserving the window width.
+  // Convert pixel delta -> data delta with the scale's slope (signed: for a
+  // vertical axis range [length,0] the slope is negative, so dragging down lowers
+  // the values). This works identically for both orientations.
   band.addEventListener("pointerdown", (ev) => {
+    ev.preventDefault();
     const startPx = horizontal ? ev.clientX : ev.clientY;
     const start = val.slice();
-    const width = start[1] - start[0];
+    const win = start[1] - start[0];
+    const [d0, d1] = scale.domain();
+    const r = scale.range();
+    const dataPerPx = (d1 - d0) / (r[r.length - 1] - r[0]);
     band.setPointerCapture(ev.pointerId);
     const move = (e) => {
       const dPx = (horizontal ? e.clientX : e.clientY) - startPx;
-      const dData = scale.invert((horizontal ? scale(dMin) : scale(dMax)) + dPx) - dMin; // delta in data units
-      let lo = start[0] + (horizontal ? dData : -dData);
-      lo = Math.max(dMin, Math.min(dMax - width, lo));
-      val = snapRange([lo, lo + width], scale.domain(), step);
+      let lo = start[0] + dPx * dataPerPx;
+      lo = Math.max(dMin, Math.min(dMax - win, lo));
+      val = snapRange([lo, lo + win], scale.domain(), step);
       layout();
       listeners.call("input", el, val.slice());
       widget.setValue(val.slice());
     };
-    const up = (e) => { band.releasePointerCapture(ev.pointerId); band.removeEventListener("pointermove", move); band.removeEventListener("pointerup", up); listeners.call("end", el, val.slice()); };
+    const up = () => {
+      band.releasePointerCapture(ev.pointerId);
+      band.removeEventListener("pointermove", move);
+      band.removeEventListener("pointerup", up);
+      listeners.call("end", el, val.slice());
+    };
     band.addEventListener("pointermove", move);
     band.addEventListener("pointerup", up);
   });
