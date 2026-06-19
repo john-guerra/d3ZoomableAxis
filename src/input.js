@@ -71,6 +71,9 @@ export function zoomableAxisInput(scaleOrDomain, {
   const listeners = dispatch("start", "input", "end");
 
   let val = snapRange(value || scale.domain(), scale.domain(), step);
+  let scentBars = [];
+  let scentIn = "var(--za-accent)";
+  let scentOut = "#cbd5e1";
 
   const container = create("div").attr("class", "zoomable-axis-input")
     .attr("role", "group")
@@ -179,12 +182,19 @@ export function zoomableAxisInput(scaleOrDomain, {
       labelLo.style.left = tx; labelLo.style.top = `${margin + g.loPx}px`;
       labelHi.style.left = tx; labelHi.style.top = `${margin + g.hiPx}px`;
     }
+    paintScent(); // recolor the in-view part of the distribution
   }
 
   // Draw a small histogram/violin of the data distribution along the axis (a
   // "scented widget": embedded info-scent so users see where the data is dense).
   function renderScent(svgSel, opts) {
-    const { values, type = "histogram", bins: nBins = 30, size = 24, color = "#cbd5e1" } = opts;
+    const { values, type = "histogram", bins: nBins = 30, size = 24, color = "#cbd5e1", colorSelected, side = "out" } = opts;
+    scentOut = color;
+    scentIn = colorSelected || "var(--za-accent)";
+    // Histogram draw direction. "out" = away from the plot (axisBottom → down,
+    // axisTop → up, axisLeft → left, axisRight → right); "in" = toward the plot.
+    const outDir = orient === "bottom" || orient === "right" ? 1 : -1;
+    const sign = (side === "in" ? -1 : 1) * outDir;
     const [d0, d1] = scale.domain();
     const w = (d1 - d0) / nBins;
     const counts = new Array(nBins).fill(0);
@@ -203,18 +213,32 @@ export function zoomableAxisInput(scaleOrDomain, {
     );
     counts.forEach((n, i) => {
       if (!n) return;
-      const a = scale(d0 + i * w);
-      const b = scale(d0 + (i + 1) * w);
+      const x0 = d0 + i * w, x1 = d0 + (i + 1) * w;
+      const a = scale(x0);
+      const b = scale(x1);
       const lo = Math.min(a, b);
       const len = Math.max(1, Math.abs(b - a) - 1);
       const h = (n / maxN) * size;
-      const r = g.append("rect").attr("fill", color).attr("fill-opacity", 0.75);
+      const r = g.append("rect").style("fill", scentOut).attr("fill-opacity", 0.8);
       if (horizontal) {
-        r.attr("x", lo).attr("width", len).attr("y", type === "violin" ? -h / 2 : -h).attr("height", h);
+        const y = type === "violin" ? -h / 2 : sign > 0 ? 0 : -h;
+        r.attr("x", lo).attr("width", len).attr("y", y).attr("height", h);
       } else {
-        r.attr("y", lo).attr("height", len).attr("x", type === "violin" ? -h / 2 : 0).attr("width", h);
+        const x = type === "violin" ? -h / 2 : sign > 0 ? 0 : -h;
+        r.attr("y", lo).attr("height", len).attr("x", x).attr("width", h);
       }
+      scentBars.push({ r, x0, x1 });
     });
+    paintScent();
+  }
+
+  // Recolor scent bars: bins overlapping the current selection use the accent color.
+  function paintScent() {
+    if (!scentBars.length) return;
+    const [lo, hi] = val;
+    for (const bar of scentBars) {
+      bar.r.style("fill", bar.x1 > lo && bar.x0 < hi ? scentIn : scentOut);
+    }
   }
 
   function onInput(which, trusted) {
