@@ -285,22 +285,34 @@ export function zoomableAxisInput(scaleOrDomain, {
     labelLo.textContent = fmt(val[0]);
     labelHi.textContent = fmt(val[1]);
     // Value badges appear OUTSIDE the chart (same side as tick labels).
-    // Horizontal: badge centered on handle x, below axis (bottom) or above (top).
-    // Vertical:   badge centered on handle y, left of axis (left) or right (right).
+    // Offset 24px from axis line clears standard d3 tick+label zone (6+3+11=20px).
+    // Clamp badge along the axis to stay within component bounds.
     if (horizontal) {
       const outDir = orient === "bottom" ? 1 : -1;
-      const ty = `${margin + thickness / 2 + outDir * (HR + 2)}px`;
+      const ty = `${margin + thickness / 2 + outDir * 24}px`;
       const xfm = orient === "bottom" ? "translate(-50%, 0)" : "translate(-50%, -100%)";
+      const containerW = length + margin * 2;
+      const loW = labelLo.offsetWidth || 50;
+      const hiW = labelHi.offsetWidth || 50;
+      // Center badge on handle, clamped so it doesn't overflow left/right edge.
+      const loLeft = Math.max(loW / 2, Math.min(containerW - loW / 2, margin + g.loPx));
+      const hiLeft = Math.max(hiW / 2, Math.min(containerW - hiW / 2, margin + g.hiPx));
       labelLo.style.transform = labelHi.style.transform = xfm;
-      labelLo.style.left = `${margin + g.loPx}px`; labelLo.style.top = ty;
-      labelHi.style.left = `${margin + g.hiPx}px`; labelHi.style.top = ty;
+      labelLo.style.left = `${loLeft}px`; labelLo.style.top = ty;
+      labelHi.style.left = `${hiLeft}px`; labelHi.style.top = ty;
     } else {
       const outDir = orient === "left" ? -1 : 1;
-      const tx = `${margin + thickness / 2 + outDir * (HR + 2)}px`;
+      const tx = `${margin + thickness / 2 + outDir * 24}px`;
       const xfm = orient === "left" ? "translate(-100%, -50%)" : "translate(0, -50%)";
+      const containerH = length + margin * 2;
+      const loH = labelLo.offsetHeight || 18;
+      const hiH = labelHi.offsetHeight || 18;
+      // Center badge on handle, clamped so it doesn't overflow top/bottom edge.
+      const loTop = Math.max(loH / 2, Math.min(containerH - loH / 2, margin + g.loPx));
+      const hiTop = Math.max(hiH / 2, Math.min(containerH - hiH / 2, margin + g.hiPx));
       labelLo.style.transform = labelHi.style.transform = xfm;
-      labelLo.style.left = tx; labelLo.style.top = `${margin + g.loPx}px`;
-      labelHi.style.left = tx; labelHi.style.top = `${margin + g.hiPx}px`;
+      labelLo.style.left = tx; labelLo.style.top = `${loTop}px`;
+      labelHi.style.left = tx; labelHi.style.top = `${hiTop}px`;
     }
     // Update SVG D-shape handles to current value positions
     updateHandleEl(loHandleEl, g.loPx, "lo");
