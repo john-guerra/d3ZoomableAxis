@@ -248,7 +248,7 @@ export function zoomableAxisInput(scaleOrDomain, {
   const labelHi = mkLabel();
 
   // Shared drag factory: wire pointer drag on target (SVG node or div) to a range input.
-  function setupDrag(target, which, clsOrClass) {
+  function setupDrag(target, which) {
     const inputEl = which === "lo" ? loInput : hiInput;
     const [sd0, sd1] = scale.domain();
     const sr = scale.range();
@@ -260,7 +260,7 @@ export function zoomableAxisInput(scaleOrDomain, {
       if (target.classed) target.classed("za-dragging", true); else target.classList.add("za-dragging");
       const startPx = horizontal ? ev.clientX : ev.clientY;
       const startVal = val[which === "lo" ? 0 : 1];
-      node.setPointerCapture(ev.pointerId);
+      // Attach move/up to document so drag works even when pointer leaves the element.
       listeners.call("start", el, val.slice());
       const move = (e) => {
         const dPx = (horizontal ? e.clientX : e.clientY) - startPx;
@@ -271,13 +271,12 @@ export function zoomableAxisInput(scaleOrDomain, {
       };
       const up = () => {
         if (target.classed) target.classed("za-dragging", false); else target.classList.remove("za-dragging");
-        node.releasePointerCapture(ev.pointerId);
-        node.removeEventListener("pointermove", move);
-        node.removeEventListener("pointerup", up);
+        document.removeEventListener("pointermove", move);
+        document.removeEventListener("pointerup", up);
         listeners.call("end", el, val.slice());
       };
-      node.addEventListener("pointermove", move);
-      node.addEventListener("pointerup", up);
+      document.addEventListener("pointermove", move);
+      document.addEventListener("pointerup", up);
     });
   }
 
