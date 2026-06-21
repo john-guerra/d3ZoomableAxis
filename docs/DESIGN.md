@@ -124,36 +124,43 @@ Recommend (a) now, (b) later.
 5. ⏳ Adopt in Explorador Canguro: replace the overlay sliders; ideally have TimeWidget expose its
    x/y scales (and optionally suppress its own axes) so the zoomable axes align by shared scale.
 
-## Handoff — in-progress / next (2026-06-19)
+## Status (2026-06-19) — good version reached, NOT published
 
-Done & committed (working, 13/13 tests, NOT published): native-input accessible axis
-(keyboard/SR/value badges), both orientations (vertical via rotate(-90)), drag-to-pan
-(fixed incl. small ranges + correct signed delta), tested geometry, scented widget
-(histogram bars + mirrored-bars violin) with in-view color-coding + `side` (draw outside),
-penguins scatter demo.
+All handoff tasks complete and committed. 13/13 tests passing.
 
-Remaining axis tasks (decisions already made — just implement):
-1. **Smooth violin via `fast-kde`** (`density1d`) — user chose fast-kde to match
-   `@john-guerra/violin-plot` (resource in `resources/violin-plot.tgz`; its ViolinPlot uses
-   `kde.density1d(Y,{bandwidth,bins})`). Render a smooth symmetric area `<path>`, two-tone by
-   selection via a clipPath rect moved in `paintScent`. Add `fast-kde` to deps + demo importmap.
-   (An attempt was reverted to keep the tree clean — redo cleanly.)
-2. **Mirrored-bars violin as a config option** — keep current mirrored bars selectable, e.g.
-   `scent.style: "kde" | "bars"` (default "kde").
-3. **Thin-line band when scent is on** — draw the selection as a thin line on the domain line
-   (not a thick band) with a still-visible/grabbable draggable area (subtle translucent hit zone
-   + a sibling thin line). Gate on `hasScent`.
-4. **Demo: axis adjacent to the scatterplot** — position the x/y axes flush against the plot
-   (like a normal scatterplot's axes), no gap.
+### What's implemented
 
-Scent drawing API in use: raw d3-selection SVG (`<rect>`/`<path>`) positioned by the component's
-d3 `scale`; violin density → `fast-kde` (decision).
+- Native `<input type="range">` dual-handle accessible axis (keyboard / screen-reader / ARIA)
+- Both orientations (horizontal + vertical via `rotate(-90)`)
+- Drag-to-pan on the selection band (verified in browser)
+- **D-shape SVG handles**: flat edge = value-marker line; bump faces outward
+  - Bottom axis: left bump (lo) / right bump (hi)
+  - Left axis: down bump (lo) / up bump (hi)
+  - Separate `za-handles-svg` layer (z-index 3) so handles are never occluded by scent
+  - `focus-within` z-order so active axis stays on top of siblings
+- **Value badges** outside the chart (below tick labels for bottom axis, left for left axis)
+  - 24px offset from axis clears standard d3 tick+label zone
+  - x/y clamped so badge never overflows component bounds at domain extremes
+- **Scented widget** (`scent: { values, type, bins }`):
+  - `type: "histogram"` — color-coded bars (grey = out of selection, accent = in-selection)
+  - `type: "violin"` — smooth KDE via `fast-kde`; two-tone clip coloring
+  - `scent.style: "kde" | "bars"` selects violin rendering style
+  - Thin selection band + faint hit-zone when scent is shown
+- **Demo** (`examples/demo.html`): penguins scatterplot with flush-aligned scented axes,
+  plus "without scent" and "plain range sliders" baseline variants
 
-## Open decisions
+### Remaining open decisions
 
-1. Package name `@john-guerra/d3-zoomable-axis` (npm-lowercase; folder `d3ZoomableAxis`). OK?
-2. Live-drag event name: `input` (chosen, DOM/reactive cohesion) vs `change`.
-3. ~~Interaction: d3-brush vs hand-rolled~~ → **resolved: native `<input type="range">`** for full accessibility.
-4. Ship a minimal default stylesheet for the handles, or leave unstyled with documented classes?
-5. Range-body **drag-to-pan** in v1 (mouse-only enhancement on top of accessible inputs) or defer?
-6. Vertical orientation in v1, or horizontal-only first (native vertical range has browser caveats)?
+1. Package name `@john-guerra/d3-zoomable-axis` — OK?
+2. Live-drag event: `input` (chosen, DOM/reactive cohesion) vs `change`
+3. ~~d3-brush vs hand-rolled~~ → **resolved: native `<input type="range">`**
+4. Ship a minimal default stylesheet, or leave unstyled with documented classes?
+5. Drag-to-pan discoverability: add a hover state on the band? (currently: thin visible line
+   shows selection; faint translucent rect is the drag hit zone)
+6. Vertical orientation caveats (native vertical range has browser-specific quirks) — document?
+
+### Not yet done (v1+ or never)
+
+- `npm pack` / `npm publish` (intentionally deferred)
+- Observable notebook demo
+- Adopt in Explorador Canguro

@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>d3-zoomable-axis — local test</title>
+  <script type="importmap">
+  {
+    "imports": {
+      "d3-selection": "../node_modules/d3-selection/src/index.js",
+      "d3-scale": "../node_modules/d3-scale/src/index.js",
+      "d3-axis": "../node_modules/d3-axis/src/index.js",
+      "d3-brush": "../node_modules/d3-brush/src/index.js",
+      "d3-dispatch": "../node_modules/d3-dispatch/src/index.js",
+      "d3-color": "../node_modules/d3-color/src/index.js",
+      "d3-format": "../node_modules/d3-format/src/index.js",
+      "d3-interpolate": "../node_modules/d3-interpolate/src/index.js",
+      "d3-time": "../node_modules/d3-time/src/index.js",
+      "d3-time-format": "../node_modules/d3-time-format/src/index.js",
+      "d3-array": "../node_modules/d3-array/src/index.js",
+      "internmap": "../node_modules/internmap/src/index.js",
+      "d3-drag": "../node_modules/d3-drag/src/index.js",
+      "d3-timer": "../node_modules/d3-timer/src/index.js",
+      "d3-transition": "../node_modules/d3-transition/src/index.js",
+      "d3-ease": "../node_modules/d3-ease/src/index.js",
+      "fast-kde": "../node_modules/fast-kde/src/index.js",
+      "reactive-widget-helper": "./reactive-widget-stub.js"
+    }
+  }
+  </script>
+  <style>
+    body { font: 14px/1.5 system-ui, sans-serif; margin: 2rem; max-width: 900px; background: #fafafa; }
+    h2 { margin-top: 2rem; }
+    .out { color: #555; margin-top: .5rem; }
+    #wrap { position: relative; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <h1>d3-zoomable-axis — p-shape / musical note handles</h1>
+  <p>Horizontal bottom axis. Drag the tick+stem or the badge pill. Double-click badge to type a value. Hover over the pan bar vs handle for different cursors.</p>
+  <div id="wrap"></div>
+  <p class="out" id="out">—</p>
+
+  <h2>Vertical left axis</h2>
+  <div id="wrap2" style="position:relative;height:300px;"></div>
+  <p class="out" id="out2">—</p>
+
+  <script type="module">
+    import { select } from "d3-selection";
+    import { scaleLinear } from "d3-scale";
+    import { zoomableAxisInput } from "../src/input.js";
+
+    // ── Horizontal axis ──────────────────────────────────────────────────────
+    const xDomain = [0, 100];
+    const plotW = 500;
+    const AXMARGIN = 22, AXTHICK = 44;
+
+    const xAxis = zoomableAxisInput(scaleLinear().domain(xDomain), {
+      orient: "bottom", step: 1, length: plotW, value: [20, 70], label: "Value", units: "u",
+    });
+    xAxis.style.position = "absolute";
+    xAxis.style.left = `${AXMARGIN}px`;
+    xAxis.style.top = `0px`;
+    document.getElementById("wrap").style.position = "relative";
+    document.getElementById("wrap").style.height = "80px";
+    document.getElementById("wrap").appendChild(xAxis);
+    xAxis.addEventListener("input", () => {
+      document.getElementById("out").textContent = `x = [${xAxis.value.map(v=>v.toFixed(1))}]`;
+    });
+
+    // ── Vertical axis ────────────────────────────────────────────────────────
+    const yDomain = [0, 100];
+    const plotH = 250;
+
+    const yAxis = zoomableAxisInput(scaleLinear().domain(yDomain), {
+      orient: "left", step: 1, length: plotH, value: [20, 70], label: "Value", units: "u",
+    });
+    yAxis.style.position = "absolute";
+    yAxis.style.left = `60px`;
+    yAxis.style.top = `0px`;
+    document.getElementById("wrap2").appendChild(yAxis);
+    yAxis.addEventListener("input", () => {
+      document.getElementById("out2").textContent = `y = [${yAxis.value.map(v=>v.toFixed(1))}]`;
+    });
+  </script>
+</body>
+</html>

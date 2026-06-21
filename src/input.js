@@ -17,7 +17,6 @@ function injectStyles() {
   stylesInjected = true;
   const css = `
 .zoomable-axis-input { position: relative; font: 10px sans-serif; --za-accent: #4682b4; z-index: 0; }
-/* Raise the focused component above siblings so its handles are never occluded. */
 .zoomable-axis-input:focus-within { z-index: 10; }
 .zoomable-axis-input .za-axis path,
 .zoomable-axis-input .za-axis line { stroke: #bbb; }
@@ -26,36 +25,52 @@ function injectStyles() {
   -webkit-appearance: none; appearance: none;
 }
 .zoomable-axis-input input[type=range]:focus { outline: none; }
-/* Native thumb is invisible; the SVG D-shape handles draw the visual instead. */
 .zoomable-axis-input input[type=range]::-webkit-slider-thumb {
   -webkit-appearance: none; pointer-events: auto; cursor: grab;
   height: 20px; width: 20px; opacity: 0;
 }
 .zoomable-axis-input input[type=range]::-moz-range-thumb {
-  pointer-events: auto; cursor: grab;
-  height: 20px; width: 20px; opacity: 0;
+  pointer-events: auto; cursor: grab; height: 20px; width: 20px; opacity: 0;
 }
-.zoomable-axis-input .za-handle .za-handle-arc {
-  fill: #fff; stroke: var(--za-accent); stroke-width: 2;
-}
-.zoomable-axis-input .za-handle .za-handle-tick {
-  stroke: var(--za-accent); stroke-width: 2; stroke-linecap: round;
-}
-.zoomable-axis-input .za-handle.focused .za-handle-arc {
-  stroke-width: 3; filter: drop-shadow(0 0 3px var(--za-accent));
-}
-/* Separate SVG layer so handles always paint above the scented distribution. */
+/* ── Musical-note / p-shape handles ─────────────────────────────────────────
+   SVG layer: tick (value marker) + stem (connecting line). pointer-events:none
+   on the SVG itself; individual .za-handle groups set pointer-events:all so
+   the tick+stem area is directly grabbable for drag. */
 .zoomable-axis-input .za-handles-svg { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; z-index: 3; }
-.zoomable-axis-input .za-selected { position: absolute; background: var(--za-accent); opacity: .25; cursor: grab; }
+.zoomable-axis-input .za-handle { cursor: grab; }
+.zoomable-axis-input .za-handle:active,
+.zoomable-axis-input .za-handle.za-dragging { cursor: grabbing; }
+.zoomable-axis-input .za-handle .za-handle-tick { stroke: var(--za-accent); stroke-width: 2; stroke-linecap: round; }
+.zoomable-axis-input .za-handle .za-handle-stem { stroke: var(--za-accent); stroke-width: 1.5; }
+.zoomable-axis-input .za-handle.focused .za-handle-tick,
+.zoomable-axis-input .za-handle.focused .za-handle-stem { stroke-width: 3; filter: drop-shadow(0 0 3px var(--za-accent)); }
+.zoomable-axis-input .za-selected { position: absolute; background: var(--za-accent); opacity: .25; cursor: move; }
 .zoomable-axis-input .za-selected:active { cursor: grabbing; }
-/* When a scented distribution is shown, the thick band would hide it: the band
-   becomes a faint grabbable hit zone and a sibling thin line marks the selection. */
 .zoomable-axis-input .za-selected.za-thin { background: var(--za-accent); opacity: .08; }
 .zoomable-axis-input .za-band-line { position: absolute; background: var(--za-accent); opacity: .9; pointer-events: none; border-radius: 1px; }
+/* Badge: pill-shaped note head at the tip of the stem. Draggable, double-click to edit. */
 .zoomable-axis-input .za-value {
-  position: absolute; pointer-events: none; font: 600 11px/1 sans-serif;
-  background: var(--za-accent); color: #fff; padding: 2px 5px; border-radius: 3px; white-space: nowrap;
+  position: absolute; z-index: 4;
+  pointer-events: auto; cursor: grab;
+  font: 700 10px/1 "SFMono-Regular","Menlo","Monaco",ui-monospace,monospace;
+  background: var(--za-accent); color: #fff;
+  padding: 4px 8px; border-radius: 10px; white-space: nowrap;
   -webkit-user-select: none; user-select: none;
+  box-shadow: 0 1px 4px rgba(0,0,0,.18);
+  transition: box-shadow .15s;
+}
+.zoomable-axis-input .za-value:hover { box-shadow: 0 2px 8px rgba(0,0,0,.25); }
+.zoomable-axis-input .za-value.za-dragging,
+.zoomable-axis-input .za-value:active { cursor: grabbing; box-shadow: 0 4px 12px rgba(0,0,0,.28); transition: none; }
+.zoomable-axis-input .za-value.za-focused { outline: 2px solid var(--za-accent); outline-offset: 2px; }
+.zoomable-axis-input .za-value.za-editing {
+  cursor: text; background: #fff; color: var(--za-accent);
+  padding: 3px 7px; border: 1.5px solid var(--za-accent);
+}
+.zoomable-axis-input .za-value.za-editing input {
+  border: none; outline: none; background: transparent;
+  font: inherit; color: inherit; width: 5em; padding: 0; margin: 0;
+  pointer-events: auto; cursor: text;
 }
 `;
   const s = document.createElement("style");
@@ -121,49 +136,44 @@ export function zoomableAxisInput(scaleOrDomain, {
   // D-shape handle layer — placed in a SEPARATE SVG (z-index 3) so handles always
   // render above the scented distribution and above sibling axis components.
   // pointer-events:none — interaction falls through to the invisible native thumbs.
-  const HR = 10; // half-circle radius (px, in axisG local coordinate space)
+  const HR = 10; // half-length of the tick line (px, in axisG local coordinate space)
+  const STEM = 14; // length of the stem from tick edge to badge (px)
   const handlesSvg = container.append("svg")
     .attr("class", "za-handles-svg").attr("aria-hidden", "true")
     .attr("width", el.style.width).attr("height", el.style.height);
   const handlesG = handlesSvg.append("g").attr("class", "za-handles")
     .attr("transform", axisG.attr("transform"));
   const mkHandleEl = () => {
-    const g = handlesG.append("g").attr("class", "za-handle");
-    g.append("path").attr("class", "za-handle-arc");
+    // pointer-events:all on the group so the tick+stem area is directly draggable.
+    const g = handlesG.append("g").attr("class", "za-handle").attr("pointer-events", "all");
     g.append("line").attr("class", "za-handle-tick");
+    g.append("line").attr("class", "za-handle-stem");
     return g;
   };
   const loHandleEl = mkHandleEl();
   const hiHandleEl = mkHandleEl();
 
-  function updateHandleEl(handleEl, px, which) {
-    // Each handle is a D-shape. The FLAT EDGE is the value-marker line at the
-    // exact selected data position. The bump extends perpendicular to the axis:
+  function updateHandleEl(handleEl, px) {
+    // Musical-note / p-shape: a tick line (value marker) + a stem reaching toward
+    // the badge outside the chart area. Both lo and hi stems point outward (away
+    // from the chart) in the same direction for a given orient.
     //
-    //   Horizontal axis: flat edge = VERTICAL line at x=px (y from -HR to +HR)
-    //     lo → bump LEFT  (CCW sweep=0 arcs through x<px)
-    //     hi → bump RIGHT (CW  sweep=1 arcs through x>px)
-    //     Together they form matching brackets: C ... D
-    //
-    //   Vertical axis ("horizontal half-circles"):
-    //     flat edge = HORIZONTAL line at y=px (x from -HR to +HR)
-    //     Arc endpoints: A=(-HR,py) at 180°, B=(HR,py) at 0° from center (0,py).
-    //     CCW (sweep=0) from 180° → passes through 90° (DOWN in y-down SVG) → bump DOWN.
-    //     CW  (sweep=1) from 180° → passes through 270° (UP in y-down SVG)  → bump UP.
-    //     lo (large py, near bottom) → bump DOWN (CCW sweep=0)
-    //     hi (small py, near top)   → bump UP   (CW  sweep=1)
-    let arcD, lx1, ly1, lx2, ly2;
+    //   bottom axis:  tick vertical at x=px; stem goes DOWN  (positive y in SVG)
+    //   top axis:     tick vertical at x=px; stem goes UP    (negative y)
+    //   left axis:    tick horizontal at y=px; stem goes LEFT (negative x)
+    //   right axis:   tick horizontal at y=px; stem goes RIGHT (positive x)
+    let tx1, ty1, tx2, ty2, sx1, sy1, sx2, sy2;
     if (horizontal) {
-      const sweep = which === "lo" ? 0 : 1;
-      arcD = `M ${px} ${-HR} A ${HR} ${HR} 0 0 ${sweep} ${px} ${HR} Z`;
-      lx1 = px; ly1 = -HR; lx2 = px; ly2 = HR; // flat edge = vertical value marker
+      tx1 = px; ty1 = -HR; tx2 = px; ty2 = HR;
+      const outY = orient === "bottom" ? 1 : -1;
+      sx1 = px; sy1 = outY * HR; sx2 = px; sy2 = outY * (HR + STEM);
     } else {
-      const sweep = which === "lo" ? 0 : 1;
-      arcD = `M ${-HR} ${px} A ${HR} ${HR} 0 0 ${sweep} ${HR} ${px} Z`;
-      lx1 = -HR; ly1 = px; lx2 = HR; ly2 = px; // flat edge = horizontal value marker
+      tx1 = -HR; ty1 = px; tx2 = HR; ty2 = px;
+      const outX = orient === "left" ? -1 : 1;
+      sx1 = outX * HR; sy1 = px; sx2 = outX * (HR + STEM); sy2 = px;
     }
-    handleEl.select(".za-handle-arc").attr("d", arcD);
-    handleEl.select(".za-handle-tick").attr("x1", lx1).attr("y1", ly1).attr("x2", lx2).attr("y2", ly2);
+    handleEl.select(".za-handle-tick").attr("x1", tx1).attr("y1", ty1).attr("x2", tx2).attr("y2", ty2);
+    handleEl.select(".za-handle-stem").attr("x1", sx1).attr("y1", sy1).attr("x2", sx2).attr("y2", sy2);
   }
 
   // selected-range band (drag to pan). With a scent, the band is a faint hit zone
@@ -206,11 +216,11 @@ export function zoomableAxisInput(scaleOrDomain, {
   const loInput = mkInput("lo");
   const hiInput = mkInput("hi");
 
-  // Mirror keyboard focus from native inputs to SVG handle elements (for a focus ring).
-  loInput.addEventListener("focus", () => loHandleEl.classed("focused", true));
-  loInput.addEventListener("blur",  () => loHandleEl.classed("focused", false));
-  hiInput.addEventListener("focus", () => hiHandleEl.classed("focused", true));
-  hiInput.addEventListener("blur",  () => hiHandleEl.classed("focused", false));
+  // Mirror keyboard focus: highlight both the SVG handle and the badge pill.
+  loInput.addEventListener("focus", () => { loHandleEl.classed("focused", true);  labelLo.classList.add("za-focused"); });
+  loInput.addEventListener("blur",  () => { loHandleEl.classed("focused", false); labelLo.classList.remove("za-focused"); });
+  hiInput.addEventListener("focus", () => { hiHandleEl.classed("focused", true);  labelHi.classList.add("za-focused"); });
+  hiInput.addEventListener("blur",  () => { hiHandleEl.classed("focused", false); labelHi.classList.remove("za-focused"); });
 
   // Dual-range z-index toggling: always give the thumb NEAREST the cursor the top
   // z-index so it is the one that receives pointer events. Without this, the input
@@ -232,10 +242,76 @@ export function zoomableAxisInput(scaleOrDomain, {
     hiInput.style.zIndex = loOnTop ? 1 : 2;
   });
 
-  // live value badges shown on top of each handle
+  // Badge pill: note head at the tip of the stem. Draggable + double-click to edit.
   const mkLabel = () => { const d = document.createElement("div"); d.className = "za-value"; container.node().appendChild(d); return d; };
   const labelLo = mkLabel();
   const labelHi = mkLabel();
+
+  // Shared drag factory: wire pointer drag on target (SVG node or div) to a range input.
+  function setupDrag(target, which, clsOrClass) {
+    const inputEl = which === "lo" ? loInput : hiInput;
+    const [sd0, sd1] = scale.domain();
+    const sr = scale.range();
+    const dataPerPx = (sd1 - sd0) / (sr[sr.length - 1] - sr[0]);
+    const node = target.node ? target.node() : target; // d3 selection or raw element
+    node.addEventListener("pointerdown", (ev) => {
+      if (ev.button !== 0) return;
+      ev.preventDefault(); ev.stopPropagation();
+      if (target.classed) target.classed("za-dragging", true); else target.classList.add("za-dragging");
+      const startPx = horizontal ? ev.clientX : ev.clientY;
+      const startVal = val[which === "lo" ? 0 : 1];
+      node.setPointerCapture(ev.pointerId);
+      listeners.call("start", el, val.slice());
+      const move = (e) => {
+        const dPx = (horizontal ? e.clientX : e.clientY) - startPx;
+        let nv = startVal + dPx * dataPerPx;
+        nv = which === "lo" ? Math.max(dMin, Math.min(val[1], nv)) : Math.max(val[0], Math.min(dMax, nv));
+        inputEl.value = nv;
+        inputEl.dispatchEvent(new Event("input", { bubbles: true }));
+      };
+      const up = () => {
+        if (target.classed) target.classed("za-dragging", false); else target.classList.remove("za-dragging");
+        node.releasePointerCapture(ev.pointerId);
+        node.removeEventListener("pointermove", move);
+        node.removeEventListener("pointerup", up);
+        listeners.call("end", el, val.slice());
+      };
+      node.addEventListener("pointermove", move);
+      node.addEventListener("pointerup", up);
+    });
+  }
+
+  // Double-click on badge → inline <input type=number> to type an exact value.
+  function setupBadgeEdit(labelEl, which) {
+    labelEl.addEventListener("dblclick", (ev) => {
+      ev.stopPropagation();
+      const curVal = val[which === "lo" ? 0 : 1];
+      labelEl.classList.add("za-editing");
+      const inp = document.createElement("input");
+      inp.type = "number"; inp.value = Math.round(curVal * 1000) / 1000; inp.step = step;
+      labelEl.textContent = ""; labelEl.appendChild(inp);
+      inp.focus(); inp.select();
+      const commit = () => {
+        const nv = Math.max(dMin, Math.min(dMax, +inp.value || curVal));
+        labelEl.classList.remove("za-editing");
+        const inputEl = which === "lo" ? loInput : hiInput;
+        inputEl.value = nv; inputEl.dispatchEvent(new Event("input", { bubbles: true }));
+      };
+      inp.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); commit(); }
+        if (e.key === "Escape") { labelEl.classList.remove("za-editing"); layout(); }
+      });
+      inp.addEventListener("blur", () => commit());
+    });
+  }
+
+  // SVG handle (tick + stem) and badge pill are both independently draggable.
+  setupDrag(loHandleEl, "lo");
+  setupDrag(hiHandleEl, "hi");
+  setupDrag(labelLo, "lo");
+  setupDrag(labelHi, "hi");
+  setupBadgeEdit(labelLo, "lo");
+  setupBadgeEdit(labelHi, "hi");
 
   function setValuetext() {
     loInput.setAttribute("aria-valuetext", `${format(val[0])}${units ? " " + units : ""}`);
@@ -253,14 +329,12 @@ export function zoomableAxisInput(scaleOrDomain, {
       value: val,
       handleR: HR, // half-circle radius from outer scope
     });
-    // Keep the band grabbable even for a small selection: enforce a minimum
-    // along-axis hit length, centered between the handles. (Fixes pan not working
-    // when the range is small, esp. on the vertical axis.)
+    // Band spans from lo sticker to hi sticker (no D-shape radius inset).
     const minHit = 16;
-    let bStart = g.band.start, bLen = g.band.length;
+    const bLo = Math.min(g.loPx, g.hiPx), bHi = Math.max(g.loPx, g.hiPx);
+    let bStart = bLo, bLen = bHi - bLo;
     if (bLen < minHit) {
-      const lo = Math.min(g.loPx, g.hiPx), hi = Math.max(g.loPx, g.hiPx);
-      bStart = (lo + hi) / 2 - minHit / 2;
+      bStart = (bLo + bHi) / 2 - minHit / 2;
       bLen = minHit;
     }
     if (horizontal) {
@@ -290,21 +364,20 @@ export function zoomableAxisInput(scaleOrDomain, {
         bandLine.style.height = `${hi - lo}px`;
       }
     }
-    // value badges on top of each handle
+    // Update SVG musical-note handles (tick + stem).
+    updateHandleEl(loHandleEl, g.loPx);
+    updateHandleEl(hiHandleEl, g.hiPx);
+    // Badge pills: positioned at stem tip (HR + STEM pixels out from axis line).
     const fmt = (v) => `${format(v)}${units ? " " + units : ""}`;
     labelLo.textContent = fmt(val[0]);
     labelHi.textContent = fmt(val[1]);
-    // Value badges appear OUTSIDE the chart (same side as tick labels).
-    // Offset 24px from axis line clears standard d3 tick+label zone (6+3+11=20px).
-    // Clamp badge along the axis to stay within component bounds.
     if (horizontal) {
       const outDir = orient === "bottom" ? 1 : -1;
-      const ty = `${margin + thickness / 2 + outDir * 24}px`;
-      const xfm = orient === "bottom" ? "translate(-50%, 0)" : "translate(-50%, -100%)";
+      const ty = `${margin + thickness / 2 + outDir * (HR + STEM)}px`;
+      const xfm = outDir > 0 ? "translate(-50%, 0)" : "translate(-50%, -100%)";
       const containerW = length + margin * 2;
       const loW = labelLo.offsetWidth || 50;
       const hiW = labelHi.offsetWidth || 50;
-      // Center badge on handle, clamped so it doesn't overflow left/right edge.
       const loLeft = Math.max(loW / 2, Math.min(containerW - loW / 2, margin + g.loPx));
       const hiLeft = Math.max(hiW / 2, Math.min(containerW - hiW / 2, margin + g.hiPx));
       labelLo.style.transform = labelHi.style.transform = xfm;
@@ -312,21 +385,17 @@ export function zoomableAxisInput(scaleOrDomain, {
       labelHi.style.left = `${hiLeft}px`; labelHi.style.top = ty;
     } else {
       const outDir = orient === "left" ? -1 : 1;
-      const tx = `${margin + thickness / 2 + outDir * 24}px`;
-      const xfm = orient === "left" ? "translate(-100%, -50%)" : "translate(0, -50%)";
+      const tx = `${margin + thickness / 2 + outDir * (HR + STEM)}px`;
+      const xfm = outDir < 0 ? "translate(-100%, -50%)" : "translate(0, -50%)";
       const containerH = length + margin * 2;
       const loH = labelLo.offsetHeight || 18;
       const hiH = labelHi.offsetHeight || 18;
-      // Center badge on handle, clamped so it doesn't overflow top/bottom edge.
       const loTop = Math.max(loH / 2, Math.min(containerH - loH / 2, margin + g.loPx));
       const hiTop = Math.max(hiH / 2, Math.min(containerH - hiH / 2, margin + g.hiPx));
       labelLo.style.transform = labelHi.style.transform = xfm;
       labelLo.style.left = tx; labelLo.style.top = `${loTop}px`;
       labelHi.style.left = tx; labelHi.style.top = `${hiTop}px`;
     }
-    // Update SVG D-shape handles to current value positions
-    updateHandleEl(loHandleEl, g.loPx, "lo");
-    updateHandleEl(hiHandleEl, g.hiPx, "hi");
     paintScent(); // recolor the in-view part of the distribution
   }
 
