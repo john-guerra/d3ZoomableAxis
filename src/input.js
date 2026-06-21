@@ -187,10 +187,17 @@ export function zoomableAxisInput(scaleOrDomain, {
       input.style.left = `${margin}px`;
       input.style.top = `${margin + thickness / 2 - H / 2}px`;
     } else {
-      input.style.transformOrigin = "center center";
+      // left=0 keeps all thumb natural-layout x-coords ≥ 0. Chrome hit-tests
+      // ::-webkit-slider-thumb at the element's natural (pre-rotation) x position,
+      // so left < 0 made the lo thumb (at natural x=left+0) unreachable off-screen.
+      // transform-origin is chosen so the visual axis position is identical to before:
+      //   thumb at internal x → visual y = (margin+length) - x  (maps lo→bottom, hi→top).
+      const ox = margin + thickness / 2 + H / 2; // = 52 for default values
+      const oy = H;
+      input.style.left = "0";
+      input.style.top = `${length - thickness / 2 - 3 * H / 2}px`;
+      input.style.transformOrigin = `${ox}px ${oy}px`;
       input.style.transform = "rotate(-90deg)";
-      input.style.left = `${margin + thickness / 2 - length / 2}px`;
-      input.style.top = `${margin + length / 2 - H / 2}px`;
     }
     container.node().appendChild(input);
     input.addEventListener("input", (e) => onInput(which, e.isTrusted));
