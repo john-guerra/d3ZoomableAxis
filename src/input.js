@@ -38,7 +38,7 @@ function injectStyles() {
   if (stylesInjected || typeof document === "undefined") return;
   stylesInjected = true;
   const css = `
-.zoomable-axis-input { position: relative; font: 10px sans-serif; --za-accent: #4682b4; --za-handle: #f5a623; z-index: 0; }
+.zoomable-axis-input { position: relative; font: 10px sans-serif; --za-accent: #4682b4; z-index: 0; }
 .zoomable-axis-input:focus-within { z-index: 10; }
 .zoomable-axis-input .za-axis path,
 .zoomable-axis-input .za-axis line { stroke: #bbb; }
@@ -65,18 +65,18 @@ function injectStyles() {
 .zoomable-axis-input .za-handle { cursor: grab; }
 .zoomable-axis-input .za-handle:active,
 .zoomable-axis-input .za-handle.za-dragging { cursor: grabbing; }
-/* Handles use their OWN color (--za-handle), distinct from the selection accent,
-   so the drag knobs read as separate from the selected-range fill/badges. */
-.zoomable-axis-input .za-handle .za-handle-tick { stroke: var(--za-handle); stroke-width: 2; stroke-linecap: round; }
-.zoomable-axis-input .za-handle .za-handle-stem { stroke: var(--za-handle); stroke-width: 1.5; }
+/* All range elements share one color (--za-accent): pill, band, and handles.
+   Shape — not hue — distinguishes them, so the widget stays visually calm. */
+.zoomable-axis-input .za-handle .za-handle-tick { stroke: var(--za-accent); stroke-width: 2; stroke-linecap: round; }
+.zoomable-axis-input .za-handle .za-handle-stem { stroke: var(--za-accent); stroke-width: 1.5; }
 /* Knob: the half-disc grab affordance at each endpoint — the only place an
-   endpoint drag starts. Sized generously for a comfortable pointer target. */
-.zoomable-axis-input .za-handle .za-knob { fill: var(--za-handle); stroke: #fff; stroke-width: 1.5; }
-.zoomable-axis-input .za-handle:hover .za-knob { fill: color-mix(in srgb, var(--za-handle) 80%, #fff); }
+   endpoint drag starts. A soft translucent ring delineates it without shouting. */
+.zoomable-axis-input .za-handle .za-knob { fill: var(--za-accent); stroke: rgba(255,255,255,.7); stroke-width: 1.25; }
+.zoomable-axis-input .za-handle:hover .za-knob { fill: color-mix(in srgb, var(--za-accent) 82%, #fff); }
 .zoomable-axis-input .za-handle.focused .za-handle-tick,
-.zoomable-axis-input .za-handle.focused .za-handle-stem { stroke-width: 3; filter: drop-shadow(0 0 3px var(--za-handle)); }
+.zoomable-axis-input .za-handle.focused .za-handle-stem { stroke-width: 3; filter: drop-shadow(0 0 3px var(--za-accent)); }
 .zoomable-axis-input .za-handle.focused .za-knob,
-.zoomable-axis-input .za-handle.za-dragging .za-knob { stroke-width: 2.5; filter: drop-shadow(0 0 3px var(--za-handle)); }
+.zoomable-axis-input .za-handle.za-dragging .za-knob { stroke-width: 2; filter: drop-shadow(0 0 3px var(--za-accent)); }
 /* Pan band: z-index 2 keeps it above the (pointer-inert) inputs so the region
    BETWEEN the knobs reliably grabs to pan the whole window. */
 .zoomable-axis-input .za-selected { position: absolute; z-index: 2; background: var(--za-accent); opacity: .25; cursor: move; }
