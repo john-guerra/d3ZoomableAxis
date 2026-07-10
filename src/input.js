@@ -147,7 +147,8 @@ export function zoomableAxisInput(scaleOrDomain, {
   format = (d) => `${Math.round(d)}`,
   // Scented-widget distribution drawn along the axis (Willett/Heer/Agrawala 2007):
   //   scent: { values:number[], type:"histogram"|"violin"|"area", style?:"kde"|"bars",
-  //            bins?:30, size?:24, color?:"#cbd5e1", colorSelected?, side?:"out"|"in",
+  //            bins?:30, size?:24, color?:"#cbd5e1", colorSelected?, side?:"out"|"in"
+  //            (histogram default "in" → bars grow toward the plot; area default "out"),
   //            bandwidth?, adjust?, pad?, curve? }
   //   KDE tunables (fast-kde): bandwidth (absolute), adjust (× the auto Scott
   //   bandwidth), pad (domain padding). `curve` applies to area AND violin.
@@ -523,7 +524,7 @@ export function zoomableAxisInput(scaleOrDomain, {
   // Draw a small histogram/violin of the data distribution along the axis (a
   // "scented widget": embedded info-scent so users see where the data is dense).
   function renderScent(svgSel, opts) {
-    const { values, type = "histogram", bins: nBins = 30, size = 24, color = "#cbd5e1", colorSelected, side = "out",
+    const { values, type = "histogram", bins: nBins = 30, size = 24, color = "#cbd5e1", colorSelected, side,
             style, bandwidth, adjust, pad, curve } = opts;
     scentOut = color;
     scentIn = colorSelected || "var(--za-accent)";
@@ -536,8 +537,11 @@ export function zoomableAxisInput(scaleOrDomain, {
     if (useKde) { renderScentKde(svgSel, values, { type, nBins, size, bandwidth, adjust, pad, curve, d0, d1 }); return; }
     // Histogram draw direction. "out" = away from the plot (axisBottom → down,
     // axisTop → up, axisLeft → left, axisRight → right); "in" = toward the plot.
+    // Histograms default to "in" so bars grow UP from a bottom axis (bar-chart
+    // convention); one-sided "area" sparklines default to "out" (fill below).
+    const effSide = side ?? (type === "area" ? "out" : "in");
     const outDir = orient === "bottom" || orient === "right" ? 1 : -1;
-    const sign = (side === "in" ? -1 : 1) * outDir;
+    const sign = (effSide === "in" ? -1 : 1) * outDir;
     const w = (d1 - d0) / nBins;
     const counts = new Array(nBins).fill(0);
     for (const raw of values) {
