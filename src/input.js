@@ -2,7 +2,16 @@ import { create, select } from "d3-selection";
 import { scaleLinear } from "d3-scale";
 import { axisBottom, axisTop, axisLeft, axisRight } from "d3-axis";
 import { dispatch } from "d3-dispatch";
-import { area as d3area, curveMonotoneX, curveMonotoneY } from "d3-shape";
+import {
+  area as d3area,
+  curveMonotoneX,
+  curveMonotoneY,
+  curveBasis,
+  curveNatural,
+  curveCatmullRom,
+  curveLinear,
+  curveStep,
+} from "d3-shape";
 import ReactiveWidget from "reactive-widget-helper";
 import { density1d } from "fast-kde";
 import { snapRange } from "./snap.js";
@@ -33,6 +42,53 @@ function inputStringToValue(s, type) {
 
 let scentClipSeq = 0; // unique clipPath ids when several axes share a page
 
+// Named d3-shape curves the scent panel offers (so `scent.curve` can be a plain
+// string that survives persistence). "monotone" resolves per-orientation below.
+const CURVE_BY_NAME = {
+  basis: curveBasis,
+  natural: curveNatural,
+  catmullRom: curveCatmullRom,
+  linear: curveLinear,
+  step: curveStep,
+};
+const CURVE_ORDER = [
+  ["basis", "Basis"],
+  ["natural", "Natural"],
+  ["monotone", "Monotone"],
+  ["catmullRom", "Catmull-Rom"],
+  ["linear", "Linear"],
+  ["step", "Step"],
+];
+const SCENT_TYPE_ORDER = [
+  ["area", "Area (sparkline)"],
+  ["violin", "Violin"],
+  ["histogram", "Histogram"],
+];
+// Which scent params the settings panel tunes + persists (never `values`, colors,
+// controls flag, or persistKey). `curve` is stored as its name string.
+const SCENT_PERSIST_KEYS = ["type", "curve", "adjust", "pad", "bins", "size"];
+
+// Configurable persistence: a `persistKey` reads/writes localStorage (guarded for
+// SSR / privacy-mode failures). A consumer wanting a different store can ignore
+// persistKey and use the "scent" event instead.
+function readScentStore(key) {
+  if (!key || typeof localStorage === "undefined") return null;
+  try {
+    const s = JSON.parse(localStorage.getItem(key) ?? "null");
+    return s && typeof s === "object" ? s : null;
+  } catch {
+    return null;
+  }
+}
+function writeScentStore(key, obj) {
+  if (!key || typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(key, JSON.stringify(obj));
+  } catch {
+    /* quota / disabled storage — persistence is best-effort */
+  }
+}
+
 let stylesInjected = false;
 function injectStyles() {
   if (stylesInjected || typeof document === "undefined") return;
@@ -48,20 +104,67 @@ function injectStyles() {
 .zoomable-axis-input .za-axis line { stroke: #bbb; }
 /* The double-click value editor is a real text field — re-enable selection. */
 .zoomable-axis-input input { -webkit-user-select: text; user-select: text; }
-.zoomable-axis-input input[type=range] {
+/* Axis range inputs (the two brush handles) — pointer-inert, invisible; keyboard
+   + a11y only. Scoped to .za-axis-range so the settings panel's real sliders keep
+   their normal appearance. */
+.zoomable-axis-input input.za-axis-range {
   position: absolute; margin: 0; background: transparent; pointer-events: none;
   -webkit-appearance: none; appearance: none;
 }
-.zoomable-axis-input input[type=range]:focus { outline: none; }
-/* Thumbs are pointer-INERT: endpoint dragging is done via the SVG .za-knob
-   (setupDrag), not the native thumb. The inputs stay for keyboard + a11y only,
-   so there is no ambiguous full-width drag zone competing with the pan band. */
-.zoomable-axis-input input[type=range]::-webkit-slider-thumb {
+.zoomable-axis-input input.za-axis-range:focus { outline: none; }
+.zoomable-axis-input input.za-axis-range::-webkit-slider-thumb {
   -webkit-appearance: none; pointer-events: none;
   height: 20px; width: 20px; opacity: 0;
 }
-.zoomable-axis-input input[type=range]::-moz-range-thumb {
+.zoomable-axis-input input.za-axis-range::-moz-range-thumb {
   pointer-events: none; height: 20px; width: 20px; opacity: 0;
+}
+/* ── Scent settings popover (opt-in via scent.controls) ──────────────────────
+   Neutral dark defaults; accents pick up --za-accent so it themes with the rest.
+   Overridable variables let a consumer restyle without patching the library. */
+.zoomable-axis-input .za-gear {
+  position: absolute; top: -2px; right: 2px; z-index: 6;
+  width: 18px; height: 18px; padding: 0; border: none; border-radius: 4px;
+  background: transparent; color: var(--za-gear, #6f6f6f);
+  font-size: 12px; line-height: 18px; cursor: pointer;
+}
+.zoomable-axis-input .za-gear:hover, .zoomable-axis-input .za-gear.on {
+  color: var(--za-gear-on, #d8d8d8); background: var(--za-panel-hover, #2c2c2c);
+}
+.zoomable-axis-input .za-scent-panel {
+  position: absolute; top: 18px; right: 0; z-index: 30; width: 224px;
+  box-sizing: border-box; background: var(--za-panel-bg, #1e1e1e);
+  border: 1px solid var(--za-panel-border, #383838); border-radius: 8px;
+  padding: 10px; box-shadow: 0 10px 28px rgba(0,0,0,.45);
+  display: flex; flex-direction: column; gap: 7px;
+  -webkit-user-select: none; user-select: none;
+}
+.zoomable-axis-input .za-scent-panel[hidden] { display: none; }
+.zoomable-axis-input .za-row { display: flex; align-items: center; gap: 8px; font-size: .72rem; }
+.zoomable-axis-input .za-row.za-disabled { opacity: .4; }
+.zoomable-axis-input .za-row > label { width: 58px; flex-shrink: 0; color: var(--za-panel-label, #9a9a9a); }
+.zoomable-axis-input .za-row select {
+  flex: 1; min-width: 0; background: var(--za-panel-field, #101010);
+  border: 1px solid var(--za-panel-border, #333); color: var(--za-panel-fg, #cfcfcf);
+  border-radius: 4px; padding: 2px 4px; font-size: .72rem;
+}
+.zoomable-axis-input .za-range { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
+.zoomable-axis-input .za-range input[type=range] {
+  flex: 1; min-width: 0; accent-color: var(--za-accent); pointer-events: auto;
+}
+.zoomable-axis-input .za-val {
+  width: 36px; flex-shrink: 0; text-align: right;
+  color: var(--za-panel-label, #9a9a9a); font-variant-numeric: tabular-nums;
+}
+.zoomable-axis-input .za-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 2px; }
+.zoomable-axis-input .za-actions button {
+  border: 1px solid var(--za-panel-border, #444); background: transparent;
+  color: var(--za-panel-fg, #cfcfcf); border-radius: 5px; padding: 3px 12px;
+  font-size: .72rem; cursor: pointer;
+}
+.zoomable-axis-input .za-actions .za-done {
+  background: var(--za-accent); border-color: var(--za-accent);
+  color: var(--za-panel-bg, #06121f); font-weight: 600;
 }
 /* ── Musical-note / p-shape handles ─────────────────────────────────────────
    SVG layer: tick (value marker) + stem (connecting line). pointer-events:none
@@ -151,10 +254,19 @@ export function zoomableAxisInput(scaleOrDomain, {
   //            (histogram default "in" → bars grow toward the plot; area default "out"),
   //            bandwidth?, adjust?, pad?, curve? }
   //   KDE tunables (fast-kde): bandwidth (absolute), adjust (× the auto Scott
-  //   bandwidth), pad (domain padding). `curve` applies to area AND violin.
+  //   bandwidth), pad (domain padding). `curve` applies to area AND violin, and may
+  //   be a d3-shape curve factory OR a name string: "basis" | "natural" |
+  //   "monotone" | "catmullRom" | "linear" | "step" (default: monotone).
   //   For violins/areas, style defaults to "kde" (smooth via fast-kde); "bars" keeps
-  //   the mirrored-bars look. Histograms are always bars. "area" is a one-sided
-  //   sparkline fill; `curve` is a d3-shape curve factory (default: monotone).
+  //   the mirrored-bars look. Histograms are always bars. "area" is a one-sided fill.
+  //
+  //   Optional built-in settings popover:
+  //     controls?:   true → render a ⚙ gear that live-tunes Shape/Curve/Smoothing
+  //                  (adjust)/Pad/Bins/Height, redrawing the scent in place.
+  //     persistKey?: localStorage key to remember the tuned params across sessions
+  //                  (omit for no persistence). Every change also fires a "scent"
+  //                  event ({type,curve,adjust,pad,bins,size}) via .on("scent", …),
+  //                  so a consumer can wire any other store instead.
   scent = null,
 } = {}) {
   const hasScent = !!(scent && scent.values && scent.values.length);
@@ -168,7 +280,23 @@ export function zoomableAxisInput(scaleOrDomain, {
   // from `scale` itself, below) keeps the original scale, so time scales still
   // render date-formatted ticks.
   const [dMin, dMax] = scale.domain().map(Number);
-  const listeners = dispatch("start", "input", "end");
+  const listeners = dispatch("start", "input", "end", "scent");
+
+  // Live-tunable scent params. Start from the caller's `scent`, then overlay any
+  // persisted settings (persistKey) so the user's chosen density look sticks.
+  const scentPersistKey = scent && scent.persistKey;
+  let scentParams = hasScent ? { ...scent } : null;
+  if (scentParams) {
+    const saved = readScentStore(scentPersistKey);
+    if (saved) scentParams = { ...scentParams, ...saved };
+  }
+  // Resolve a curve name (or factory) to a d3-shape curve. Unknown/absent → null,
+  // letting areaPath/violinPath fall back to their orient-aware monotone default.
+  function resolveCurve(c) {
+    if (typeof c === "function") return c;
+    if (c === "monotone") return horizontal ? curveMonotoneX : curveMonotoneY;
+    return (typeof c === "string" && CURVE_BY_NAME[c]) || null;
+  }
 
   let val = snapRange(value || [dMin, dMax], [dMin, dMax], step);
   let scentBars = [];          // bars mode: [{r, x0, x1}] recolored by overlap
@@ -189,7 +317,11 @@ export function zoomableAxisInput(scaleOrDomain, {
     .attr("width", el.style.width).attr("height", el.style.height)
     .style("position", "absolute").style("left", 0).style("top", 0)
     .style("overflow", "visible").style("pointer-events", "none");
-  if (scent && scent.values && scent.values.length) renderScent(svg, scent);
+  // Dedicated host <g> for the scent, kept BEFORE the axis group so ticks always
+  // draw on top — and so live re-renders (settings panel) can clear + redraw it
+  // in place without disturbing z-order.
+  const scentHost = svg.append("g").attr("class", "za-scent-host");
+  if (hasScent) renderScent(scentHost, scentParams);
   const axisG = svg.append("g")
     .attr("transform", horizontal ? `translate(${margin},${orient === "top" ? margin : margin + thickness / 2})`
                                   : `translate(${orient === "right" ? margin : margin + thickness / 2},${margin})`);
@@ -273,6 +405,9 @@ export function zoomableAxisInput(scaleOrDomain, {
   const mkInput = (which) => {
     const input = document.createElement("input");
     input.type = "range";
+    // Class-tag so the axis-input CSS (pointer-inert, appearance:none) targets ONLY
+    // these two, never the settings panel's own real range sliders.
+    input.className = "za-axis-range";
     input.min = dMin; input.max = dMax; input.step = step || "any";
     input.setAttribute("aria-label", `${which === "lo" ? "Minimum" : "Maximum"} ${label || "value"}`);
     input.setAttribute("aria-orientation", horizontal ? "horizontal" : "vertical");
@@ -529,6 +664,11 @@ export function zoomableAxisInput(scaleOrDomain, {
   function renderScent(svgSel, opts) {
     const { values, type = "histogram", bins: nBins = 30, size = 24, color = "#cbd5e1", colorSelected, side,
             style, bandwidth, adjust, pad, curve } = opts;
+    // Clear any prior drawing so this can be re-invoked live (settings panel).
+    svgSel.selectAll("*").remove();
+    scentBars = [];
+    scentClipRect = null;
+    const curveFn = resolveCurve(curve);
     scentOut = color;
     scentIn = colorSelected || "var(--za-accent)";
     scentSize = size;
@@ -537,7 +677,7 @@ export function zoomableAxisInput(scaleOrDomain, {
     // sparkline fill (baseline on the axis, curve outward); "violin" mirrors it.
     const useKde = (type === "violin" || type === "area") && (style ?? "kde") === "kde";
     const [d0, d1] = scale.domain().map(Number);
-    if (useKde) { renderScentKde(svgSel, values, { type, nBins, size, bandwidth, adjust, pad, curve, d0, d1 }); return; }
+    if (useKde) { renderScentKde(svgSel, values, { type, nBins, size, bandwidth, adjust, pad, curve: curveFn, d0, d1 }); return; }
     // Histogram draw direction. "out" = away from the plot (axisBottom → down,
     // axisTop → up, axisLeft → left, axisRight → right); "in" = toward the plot.
     // Histograms default to "in" so bars grow UP from a bottom axis (bar-chart
@@ -709,6 +849,121 @@ export function zoomableAxisInput(scaleOrDomain, {
     band.addEventListener("pointermove", move);
     band.addEventListener("pointerup", up);
   });
+
+  // Only the tunable subset is persisted/emitted (never data/colors/flags). curve
+  // must be a name string to serialize — a factory (if passed) is simply omitted.
+  const pickScent = (p) => {
+    const o = {};
+    for (const k of SCENT_PERSIST_KEYS) if (p[k] != null) o[k] = p[k];
+    if (typeof o.curve !== "string") delete o.curve;
+    return o;
+  };
+  // Apply a change to the live scent: merge, redraw in place, persist, emit.
+  function updateScent(patch) {
+    if (!scentParams) return;
+    scentParams = { ...scentParams, ...patch };
+    renderScent(scentHost, scentParams); // clears + redraws + repaints selection
+    if (scentPersistKey) writeScentStore(scentPersistKey, pickScent(scentParams));
+    listeners.call("scent", el, pickScent(scentParams));
+  }
+
+  // Optional in-widget settings popover (scent.controls) to live-tune the density.
+  if (scentParams && scent.controls) buildScentControls();
+  function buildScentControls() {
+    const defaults = pickScent(scent); // caller's params = the "Reset" target
+    const gear = document.createElement("button");
+    gear.type = "button"; gear.className = "za-gear"; gear.textContent = "⚙";
+    gear.title = "Density settings";
+    gear.setAttribute("aria-label", "Density settings");
+    gear.setAttribute("aria-expanded", "false");
+    const panel = document.createElement("div");
+    panel.className = "za-scent-panel"; panel.hidden = true;
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-label", "Density settings");
+
+    let open = false;
+    // Outside-click closes the panel. Attached only while open (and self-removes
+    // if the widget was torn down while open) so rebuilds never leak listeners.
+    const onDocDown = (e) => {
+      if (!gear.isConnected) { document.removeEventListener("pointerdown", onDocDown); return; }
+      if (open && !panel.contains(e.target) && e.target !== gear) setOpen(false);
+    };
+    const setOpen = (v) => {
+      open = v; panel.hidden = !v;
+      gear.classList.toggle("on", v);
+      gear.setAttribute("aria-expanded", String(v));
+      if (v) document.addEventListener("pointerdown", onDocDown);
+      else document.removeEventListener("pointerdown", onDocDown);
+    };
+    gear.addEventListener("click", (e) => { e.stopPropagation(); setOpen(!open); });
+
+    const ctrls = []; // {el, get, disableWhenHist}
+    const isHist = () => (scentParams.type || "area") === "histogram";
+    const mkRow = (labelText, controlEl, disableWhenHist) => {
+      const row = document.createElement("div");
+      row.className = "za-row";
+      const lab = document.createElement("label");
+      lab.textContent = labelText;
+      row.appendChild(lab); row.appendChild(controlEl);
+      panel.appendChild(row);
+      ctrls.push({ row, controlEl, disableWhenHist });
+    };
+    const mkSelect = (order, key, patchOf, disableWhenHist) => {
+      const sel = document.createElement("select");
+      for (const [v, t] of order) { const o = document.createElement("option"); o.value = v; o.textContent = t; sel.appendChild(o); }
+      sel.addEventListener("change", () => updateScent(patchOf(sel.value)));
+      sel._sync = () => { sel.value = key(scentParams); };
+      return sel;
+    };
+    const mkRange = (key, min, max, stepv, fmt, disableWhenHist) => {
+      const wrap = document.createElement("span"); wrap.className = "za-range";
+      const inp = document.createElement("input");
+      inp.type = "range"; inp.min = min; inp.max = max; inp.step = stepv;
+      const out = document.createElement("span"); out.className = "za-val";
+      inp.addEventListener("input", () => { updateScent({ [key]: +inp.value }); out.textContent = fmt(+inp.value); });
+      wrap.appendChild(inp); wrap.appendChild(out);
+      wrap._sync = () => { const v = scentParams[key] != null ? scentParams[key] : min; inp.value = v; out.textContent = fmt(+v); };
+      return wrap;
+    };
+
+    const typeSel = mkSelect(SCENT_TYPE_ORDER, (p) => p.type || "area",
+      (v) => ({ type: v, style: v === "histogram" ? "bars" : "kde" }));
+    mkRow("Shape", typeSel);
+    const curveSel = mkSelect(CURVE_ORDER, (p) => (typeof p.curve === "string" ? p.curve : "basis"),
+      (v) => ({ curve: v }), true);
+    mkRow("Curve", curveSel, true);
+    mkRow("Smoothing", mkRange("adjust", 0.2, 3, 0.1, (v) => "×" + v.toFixed(1)), true);
+    mkRow("Pad", mkRange("pad", 0, 0.5, 0.02, (v) => (+v).toFixed(2)), true);
+    mkRow("Bins", mkRange("bins", 10, 120, 1, (v) => String(v)));
+    mkRow("Height", mkRange("size", 12, 48, 1, (v) => v + "px"));
+
+    const actions = document.createElement("div");
+    actions.className = "za-actions";
+    const resetBtn = document.createElement("button");
+    resetBtn.type = "button"; resetBtn.className = "za-reset"; resetBtn.textContent = "Reset";
+    resetBtn.addEventListener("click", () => { updateScent(defaults); syncControls(); });
+    const doneBtn = document.createElement("button");
+    doneBtn.type = "button"; doneBtn.className = "za-done"; doneBtn.textContent = "Done";
+    doneBtn.addEventListener("click", () => setOpen(false));
+    actions.appendChild(resetBtn); actions.appendChild(doneBtn);
+    panel.appendChild(actions);
+
+    function syncControls() {
+      const hist = isHist();
+      for (const { row, controlEl, disableWhenHist } of ctrls) {
+        (controlEl._sync || (() => {}))();
+        const off = disableWhenHist && hist;
+        row.classList.toggle("za-disabled", !!off);
+        controlEl.querySelectorAll?.("input,select").forEach?.((n) => (n.disabled = off));
+        if (controlEl.tagName === "SELECT") controlEl.disabled = off;
+      }
+    }
+    // Re-sync controls (values + enable/disable) whenever the type toggles.
+    typeSel.addEventListener("change", () => syncControls());
+    syncControls();
+    container.node().appendChild(gear);
+    container.node().appendChild(panel);
+  }
 
   const widget = ReactiveWidget(el, {
     value: val.slice(),
