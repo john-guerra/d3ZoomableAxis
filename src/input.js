@@ -38,7 +38,7 @@ function injectStyles() {
   if (stylesInjected || typeof document === "undefined") return;
   stylesInjected = true;
   const css = `
-.zoomable-axis-input { position: relative; font: 10px sans-serif; --za-accent: #4682b4; z-index: 0; }
+.zoomable-axis-input { position: relative; font: 10px sans-serif; --za-accent: #4682b4; --za-handle: #f5a623; z-index: 0; }
 .zoomable-axis-input:focus-within { z-index: 10; }
 .zoomable-axis-input .za-axis path,
 .zoomable-axis-input .za-axis line { stroke: #bbb; }
@@ -65,16 +65,18 @@ function injectStyles() {
 .zoomable-axis-input .za-handle { cursor: grab; }
 .zoomable-axis-input .za-handle:active,
 .zoomable-axis-input .za-handle.za-dragging { cursor: grabbing; }
-.zoomable-axis-input .za-handle .za-handle-tick { stroke: var(--za-accent); stroke-width: 2; stroke-linecap: round; }
-.zoomable-axis-input .za-handle .za-handle-stem { stroke: var(--za-accent); stroke-width: 1.5; }
-/* Knob: the round grab affordance at each endpoint — the only place an endpoint
-   drag starts. Sized generously for a comfortable pointer target. */
-.zoomable-axis-input .za-handle .za-knob { fill: var(--za-accent); stroke: #fff; stroke-width: 1.5; }
-.zoomable-axis-input .za-handle:hover .za-knob { fill: color-mix(in srgb, var(--za-accent) 80%, #fff); }
+/* Handles use their OWN color (--za-handle), distinct from the selection accent,
+   so the drag knobs read as separate from the selected-range fill/badges. */
+.zoomable-axis-input .za-handle .za-handle-tick { stroke: var(--za-handle); stroke-width: 2; stroke-linecap: round; }
+.zoomable-axis-input .za-handle .za-handle-stem { stroke: var(--za-handle); stroke-width: 1.5; }
+/* Knob: the half-disc grab affordance at each endpoint — the only place an
+   endpoint drag starts. Sized generously for a comfortable pointer target. */
+.zoomable-axis-input .za-handle .za-knob { fill: var(--za-handle); stroke: #fff; stroke-width: 1.5; }
+.zoomable-axis-input .za-handle:hover .za-knob { fill: color-mix(in srgb, var(--za-handle) 80%, #fff); }
 .zoomable-axis-input .za-handle.focused .za-handle-tick,
-.zoomable-axis-input .za-handle.focused .za-handle-stem { stroke-width: 3; filter: drop-shadow(0 0 3px var(--za-accent)); }
+.zoomable-axis-input .za-handle.focused .za-handle-stem { stroke-width: 3; filter: drop-shadow(0 0 3px var(--za-handle)); }
 .zoomable-axis-input .za-handle.focused .za-knob,
-.zoomable-axis-input .za-handle.za-dragging .za-knob { stroke-width: 2.5; filter: drop-shadow(0 0 3px var(--za-accent)); }
+.zoomable-axis-input .za-handle.za-dragging .za-knob { stroke-width: 2.5; filter: drop-shadow(0 0 3px var(--za-handle)); }
 /* Pan band: z-index 2 keeps it above the (pointer-inert) inputs so the region
    BETWEEN the knobs reliably grabs to pan the whole window. */
 .zoomable-axis-input .za-selected { position: absolute; z-index: 2; background: var(--za-accent); opacity: .25; cursor: move; }
@@ -426,19 +428,21 @@ export function zoomableAxisInput(scaleOrDomain, {
     const MIN_PAN = 10; // px; below this there's no room to pan between endpoints
     const bLo = Math.min(g.loPx, g.hiPx), bHi = Math.max(g.loPx, g.hiPx);
     const bStart = bLo + INNER_PAD, bLen = bHi - bLo - 2 * INNER_PAD;
+    const BAND_THICK = 5; // px — a slim pan strip sitting on the axis line
     if (bLen < MIN_PAN) {
       band.style.display = "none";
     } else {
       band.style.display = "block";
+      const cross = margin + thickness / 2 - BAND_THICK / 2; // center on axis line
       if (horizontal) {
         band.style.left = `${margin + bStart}px`;
-        band.style.top = `${margin}px`;
+        band.style.top = `${cross}px`;
         band.style.width = `${bLen}px`;
-        band.style.height = `${thickness}px`;
+        band.style.height = `${BAND_THICK}px`;
       } else {
-        band.style.left = `${margin}px`;
+        band.style.left = `${cross}px`;
         band.style.top = `${margin + bStart}px`;
-        band.style.width = `${thickness}px`;
+        band.style.width = `${BAND_THICK}px`;
         band.style.height = `${bLen}px`;
       }
     }
