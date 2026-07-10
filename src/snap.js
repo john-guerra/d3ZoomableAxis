@@ -5,7 +5,12 @@
 // No d3 / DOM dependencies, so this is unit-testable in isolation.
 
 export function snapValue(v, domain, step = 1) {
-  const [dMin, dMax] = domain;
+  // Coerce to numbers so a Date (or numeric-string) domain works: `Date + number`
+  // is string concatenation, which used to poison the result (drag emitted NaN
+  // when driven by a d3 time scale, whose domain() returns Date objects).
+  const dMin = +domain[0];
+  const dMax = +domain[1];
+  v = +v;
   if (v <= dMin) return dMin;
   if (v >= dMax) return dMax;
   if (!step) return v;

@@ -31,3 +31,14 @@ test("snapValue clamps and snaps a single value", () => {
   assert.equal(snapValue(-1, [0, 100], 5), 0);
   assert.equal(snapValue(1000, [0, 100], 5), 100);
 });
+
+test("Date-object domain works (time scales) — returns finite numbers, never NaN", () => {
+  const lo = new Date("2020-06-15").getTime();
+  const hi = new Date("2022-03-01").getTime();
+  const dom = [new Date("2013-08-19"), new Date("2025-12-13")]; // as d3 scaleTime.domain() returns
+  const r = snapRange([lo, hi], dom, 1);
+  assert.ok(Number.isFinite(r[0]) && Number.isFinite(r[1]), `got ${r}`);
+  assert.deepEqual(r, [lo, hi]); // in-range, step 1 → unchanged
+  // A Date passed as the value coerces too (no NaN, no string concatenation).
+  assert.equal(snapValue(new Date("2021-01-01"), dom, 0), Date.parse("2021-01-01"));
+});

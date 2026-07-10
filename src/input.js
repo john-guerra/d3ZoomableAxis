@@ -2,12 +2,34 @@ import { create, select } from "d3-selection";
 import { scaleLinear } from "d3-scale";
 import { axisBottom, axisTop, axisLeft, axisRight } from "d3-axis";
 import { dispatch } from "d3-dispatch";
+import { area as d3area, curveMonotoneX, curveMonotoneY } from "d3-shape";
 import ReactiveWidget from "reactive-widget-helper";
 import { density1d } from "fast-kde";
 import { snapRange } from "./snap.js";
 import { axisGeometry } from "./geometry.js";
 
 const AXIS = { bottom: axisBottom, top: axisTop, left: axisLeft, right: axisRight };
+
+// Value <-> native-input string for the exact-entry editor. Numbers pass through;
+// temporal types serialize/parse in LOCAL time (what the user sees on the axis),
+// so a typed "2021-12-31 14:03:20" round-trips to the same wall-clock instant.
+const pad2 = (n) => String(n).padStart(2, "0");
+function valueToInputString(v, type) {
+  if (type === "number") return String(Math.round(v * 1000) / 1000);
+  const d = new Date(v);
+  const ymd = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  const hms = `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+  if (type === "date") return ymd;
+  if (type === "time") return hms;
+  return `${ymd}T${hms}`; // datetime-local
+}
+function inputStringToValue(s, type) {
+  if (type === "number") return +s;
+  if (!s) return NaN;
+  // "date" has no time part → pin to local midnight (bare "YYYY-MM-DD" would
+  // otherwise parse as UTC and drift by the timezone offset).
+  return new Date(type === "date" ? `${s}T00:00` : s).getTime();
+}
 
 let scentClipSeq = 0; // unique clipPath ids when several axes share a page
 
@@ -91,13 +113,22 @@ export function zoomableAxisInput(scaleOrDomain, {
   margin = 22,
   label = "",
   units = "",
+  // Axis tick hint passed straight to d3's axis.ticks(): a count (e.g. 4) or a
+  // d3 time interval. null keeps d3's default (~10) — too dense for a compact
+  // sparkline, so callers there should pass a small count.
+  ticks = null,
+  // Native input type for the double-click "type an exact value" editor:
+  // "number" (default) or a temporal type ("date" | "datetime-local" | "time")
+  // when the axis represents time. Drives value↔string conversion below.
+  inputType = "number",
   format = (d) => `${Math.round(d)}`,
   // Scented-widget distribution drawn along the axis (Willett/Heer/Agrawala 2007):
-  //   scent: { values:number[], type:"histogram"|"violin", style?:"kde"|"bars",
+  //   scent: { values:number[], type:"histogram"|"violin"|"area", style?:"kde"|"bars",
   //            bins?:30, size?:24, color?:"#cbd5e1", colorSelected?, side?:"out"|"in",
-  //            bandwidth?, pad? }
-  //   For violins, style defaults to "kde" (smooth area via fast-kde); "bars" keeps
-  //   the mirrored-bars look. Histograms are always bars.
+  //            bandwidth?, pad?, curve? }
+  //   For violins/areas, style defaults to "kde" (smooth via fast-kde); "bars" keeps
+  //   the mirrored-bars look. Histograms are always bars. "area" is a one-sided
+  //   sparkline fill; `curve` is a d3-shape curve factory (default: monotone).
   scent = null,
 } = {}) {
   const hasScent = !!(scent && scent.values && scent.values.length);
@@ -105,10 +136,15 @@ export function zoomableAxisInput(scaleOrDomain, {
   const horizontal = orient === "bottom" || orient === "top";
   const scale = (typeof scaleOrDomain === "function" ? scaleOrDomain.copy() : scaleLinear().domain(scaleOrDomain))
     .range(horizontal ? [0, length] : [length, 0]);
-  const [dMin, dMax] = scale.domain();
+  // Numeric domain bounds. scale.domain() returns Date objects for a d3 time
+  // scale; coerce so arithmetic (snapRange, drag deltas, native input min/max)
+  // stays numeric instead of concatenating strings into NaN. The axis (drawn
+  // from `scale` itself, below) keeps the original scale, so time scales still
+  // render date-formatted ticks.
+  const [dMin, dMax] = scale.domain().map(Number);
   const listeners = dispatch("start", "input", "end");
 
-  let val = snapRange(value || scale.domain(), scale.domain(), step);
+  let val = snapRange(value || [dMin, dMax], [dMin, dMax], step);
   let scentBars = [];          // bars mode: [{r, x0, x1}] recolored by overlap
   let scentClipRect = null;    // kde mode: <rect> that two-tones the in-view area
   let scentSize = 24;          // cross-axis extent of the scent drawing (px)
@@ -131,7 +167,9 @@ export function zoomableAxisInput(scaleOrDomain, {
   const axisG = svg.append("g")
     .attr("transform", horizontal ? `translate(${margin},${orient === "top" ? margin : margin + thickness / 2})`
                                   : `translate(${orient === "right" ? margin : margin + thickness / 2},${margin})`);
-  axisG.call(AXIS[orient](scale).tickSizeOuter(0));
+  const axis = AXIS[orient](scale).tickSizeOuter(0);
+  if (ticks != null) axis.ticks(ticks);
+  axisG.call(axis);
 
   // D-shape handle layer — placed in a SEPARATE SVG (z-index 3) so handles always
   // render above the scented distribution and above sibling axis components.
@@ -247,54 +285,80 @@ export function zoomableAxisInput(scaleOrDomain, {
   const labelLo = mkLabel();
   const labelHi = mkLabel();
 
-  // Shared drag factory: wire pointer drag on target (SVG node or div) to a range input.
+  // Shared drag factory: wire pointer drag on target (SVG node or div) to a range
+  // input. A movement THRESHOLD gates the drag so a stationary press+release stays
+  // a click — otherwise preventDefault-on-pointerdown would swallow the badge's
+  // double-click-to-edit. We only preventDefault (and mark dragging) once the
+  // pointer actually moves past the threshold.
+  const DRAG_THRESH = 3; // px
   function setupDrag(target, which) {
     const inputEl = which === "lo" ? loInput : hiInput;
-    const [sd0, sd1] = scale.domain();
     const sr = scale.range();
-    const dataPerPx = (sd1 - sd0) / (sr[sr.length - 1] - sr[0]);
+    const dataPerPx = (dMax - dMin) / (sr[sr.length - 1] - sr[0]);
     const node = target.node ? target.node() : target; // d3 selection or raw element
     node.addEventListener("pointerdown", (ev) => {
       if (ev.button !== 0) return;
-      ev.preventDefault(); ev.stopPropagation();
-      if (target.classed) target.classed("za-dragging", true); else target.classList.add("za-dragging");
       const startPx = horizontal ? ev.clientX : ev.clientY;
       const startVal = val[which === "lo" ? 0 : 1];
+      let started = false;
       // Attach move/up to document so drag works even when pointer leaves the element.
-      listeners.call("start", el, val.slice());
       const move = (e) => {
         const dPx = (horizontal ? e.clientX : e.clientY) - startPx;
+        if (!started) {
+          if (Math.abs(dPx) < DRAG_THRESH) return; // still a click, let dblclick fire
+          started = true;
+          if (target.classed) target.classed("za-dragging", true); else target.classList.add("za-dragging");
+          listeners.call("start", el, val.slice());
+        }
+        e.preventDefault();
         let nv = startVal + dPx * dataPerPx;
         nv = which === "lo" ? Math.max(dMin, Math.min(val[1], nv)) : Math.max(val[0], Math.min(dMax, nv));
         inputEl.value = nv;
-        inputEl.dispatchEvent(new Event("input", { bubbles: true }));
+        // Drive the shared handler directly: a synthetic dispatchEvent("input")
+        // is untrusted, and onInput's trusted-gate would swallow the emit — so
+        // handle drags would move the thumb but never apply the filter.
+        onInput(which, true);
       };
       const up = () => {
-        if (target.classed) target.classed("za-dragging", false); else target.classList.remove("za-dragging");
         document.removeEventListener("pointermove", move);
         document.removeEventListener("pointerup", up);
-        listeners.call("end", el, val.slice());
+        if (started) {
+          if (target.classed) target.classed("za-dragging", false); else target.classList.remove("za-dragging");
+          listeners.call("end", el, val.slice());
+        }
       };
       document.addEventListener("pointermove", move);
       document.addEventListener("pointerup", up);
     });
   }
 
-  // Double-click on badge → inline <input type=number> to type an exact value.
+  // Double-click a badge → a standard native <input> to type an exact value.
+  // Its type follows `inputType` (number, or date/datetime-local/time for a
+  // temporal axis), so the picker is the OS-native one for that kind of value.
   function setupBadgeEdit(labelEl, which) {
     labelEl.addEventListener("dblclick", (ev) => {
       ev.stopPropagation();
       const curVal = val[which === "lo" ? 0 : 1];
       labelEl.classList.add("za-editing");
       const inp = document.createElement("input");
-      inp.type = "number"; inp.value = Math.round(curVal * 1000) / 1000; inp.step = step;
+      inp.type = inputType;
+      inp.value = valueToInputString(curVal, inputType);
+      // step: numeric axes keep the widget's step; temporal ones expose seconds.
+      if (inputType === "number") inp.step = step;
+      else if (inputType !== "date") inp.step = 1;
+      // Widen for temporal types so the native date/time picker isn't clipped by
+      // the narrow badge (the default 5em CSS width only fits a number).
+      inp.style.width = inputType === "number" ? "5em"
+        : inputType === "date" ? "8.5em"
+        : inputType === "time" ? "7em" : "13em";
       labelEl.textContent = ""; labelEl.appendChild(inp);
-      inp.focus(); inp.select();
+      inp.focus(); if (inp.select) inp.select();
       const commit = () => {
-        const nv = Math.max(dMin, Math.min(dMax, +inp.value || curVal));
+        const parsed = inputStringToValue(inp.value, inputType);
+        const nv = Math.max(dMin, Math.min(dMax, Number.isFinite(parsed) ? parsed : curVal));
         labelEl.classList.remove("za-editing");
         const inputEl = which === "lo" ? loInput : hiInput;
-        inputEl.value = nv; inputEl.dispatchEvent(new Event("input", { bubbles: true }));
+        inputEl.value = nv; onInput(which, true); // trusted-gate: emit directly (see setupDrag)
       };
       inp.addEventListener("keydown", (e) => {
         if (e.key === "Enter") { e.preventDefault(); commit(); }
@@ -323,7 +387,7 @@ export function zoomableAxisInput(scaleOrDomain, {
     setValuetext();
     // along-axis geometry (handles + band) from the tested pure module
     const g = axisGeometry({
-      domain: scale.domain(),
+      domain: [dMin, dMax],
       range: horizontal ? [0, length] : [length, 0],
       value: val,
       handleR: HR, // half-circle radius from outer scope
@@ -377,11 +441,23 @@ export function zoomableAxisInput(scaleOrDomain, {
       const containerW = length + margin * 2;
       const loW = labelLo.offsetWidth || 50;
       const hiW = labelHi.offsetWidth || 50;
-      const loLeft = Math.max(loW / 2, Math.min(containerW - loW / 2, margin + g.loPx));
-      const hiLeft = Math.max(hiW / 2, Math.min(containerW - hiW / 2, margin + g.hiPx));
+      // Popover-style collision handling: keep each badge centered on its handle
+      // when they're far apart, but once they'd overlap, push lo left and hi
+      // right (splitting around their midpoint) so they never stack. GAP keeps a
+      // small breathing space. Badges may overflow the widget box — that's fine
+      // (the host leaves room around it), so we deliberately DON'T clamp to
+      // containerW; clipping the date to fit is worse than a little overflow.
+      const GAP = 6;
+      let loC = margin + g.loPx, hiC = margin + g.hiPx;
+      const minApart = (loW + hiW) / 2 + GAP;
+      if (hiC - loC < minApart) {
+        const mid = (loC + hiC) / 2;
+        loC = mid - minApart / 2;
+        hiC = mid + minApart / 2;
+      }
       labelLo.style.transform = labelHi.style.transform = xfm;
-      labelLo.style.left = `${loLeft}px`; labelLo.style.top = ty;
-      labelHi.style.left = `${hiLeft}px`; labelHi.style.top = ty;
+      labelLo.style.left = `${loC}px`; labelLo.style.top = ty;
+      labelHi.style.left = `${hiC}px`; labelHi.style.top = ty;
     } else {
       const outDir = orient === "left" ? -1 : 1;
       const tx = `${margin + thickness / 2 + outDir * (HR + STEM)}px`;
@@ -402,15 +478,16 @@ export function zoomableAxisInput(scaleOrDomain, {
   // "scented widget": embedded info-scent so users see where the data is dense).
   function renderScent(svgSel, opts) {
     const { values, type = "histogram", bins: nBins = 30, size = 24, color = "#cbd5e1", colorSelected, side = "out",
-            style, bandwidth, pad } = opts;
+            style, bandwidth, pad, curve } = opts;
     scentOut = color;
     scentIn = colorSelected || "var(--za-accent)";
     scentSize = size;
-    // Violins default to a smooth KDE area (style "kde"); "bars" keeps the
-    // mirrored-bars look. Histograms are always bars.
-    const useKde = type === "violin" && (style ?? "kde") === "kde";
-    const [d0, d1] = scale.domain();
-    if (useKde) { renderScentKde(svgSel, values, { nBins, size, bandwidth, pad, d0, d1 }); return; }
+    // Violins/areas default to a smooth KDE (style "kde"); "bars" keeps the
+    // mirrored-bars look. Histograms are always bars. "area" is a one-sided
+    // sparkline fill (baseline on the axis, curve outward); "violin" mirrors it.
+    const useKde = (type === "violin" || type === "area") && (style ?? "kde") === "kde";
+    const [d0, d1] = scale.domain().map(Number);
+    if (useKde) { renderScentKde(svgSel, values, { type, nBins, size, bandwidth, pad, curve, d0, d1 }); return; }
     // Histogram draw direction. "out" = away from the plot (axisBottom → down,
     // axisTop → up, axisLeft → left, axisRight → right); "in" = toward the plot.
     const outDir = orient === "bottom" || orient === "right" ? 1 : -1;
@@ -456,7 +533,7 @@ export function zoomableAxisInput(scaleOrDomain, {
   // color and an overlay in the "in" color clipped to a rect that paintScent
   // slides to cover only the selected range. That two-tone-by-clip trick keeps
   // the silhouette continuous (no per-bin seams) while still coloring in-view.
-  function renderScentKde(svgSel, values, { nBins, size, bandwidth, pad, d0, d1 }) {
+  function renderScentKde(svgSel, values, { type = "violin", nBins, size, bandwidth, pad, curve, d0, d1 }) {
     const nums = [];
     for (const raw of values) { const v = +raw; if (raw != null && !Number.isNaN(v)) nums.push(v); }
     // bandwidth/pad pass straight to fast-kde; omitted → its automatic (Scott) rule.
@@ -466,7 +543,8 @@ export function zoomableAxisInput(scaleOrDomain, {
     const dens = Array.from(density1d(nums, kdeOpts)).filter((p) => p.x >= d0 && p.x <= d1);
     if (dens.length < 2) return;
     const maxY = Math.max(...dens.map((p) => p.y)) || 1;
-    const dPath = violinPath(dens, maxY, size / 2);
+    // "area" = one-sided fill (full `size` outward); "violin" = symmetric (± half).
+    const dPath = type === "area" ? areaPath(dens, maxY, size, curve) : violinPath(dens, maxY, size / 2);
 
     const g = svgSel.append("g").attr("class", "za-scent").attr(
       "transform",
@@ -491,6 +569,26 @@ export function zoomableAxisInput(scaleOrDomain, {
     pts.forEach((p, i) => { d += (i ? "L" : "M") + at(along(p), -cross(p)) + " "; }); // top edge
     for (let i = pts.length - 1; i >= 0; i--) d += "L" + at(along(pts[i]), cross(pts[i])) + " "; // bottom edge
     return d + "Z";
+  }
+
+  // One-sided area (sparkline): baseline on the axis line (cross 0), the density
+  // curve rises `extent` px *toward the plot* (upward for a bottom axis). The
+  // drag handles/badges point outward (below), so an upward area never collides
+  // with them. Uses d3-shape's area generator with a monotone curve — smoother
+  // than straight segments, and monotone won't overshoot the baseline (a density
+  // is non-negative, so no spurious dips below 0). Same local space as
+  // violinPath, so the clip two-tone works unchanged.
+  function areaPath(pts, maxY, extent, curve) {
+    const upDir = orient === "bottom" || orient === "right" ? -1 : 1;
+    const along = (d) => scale(d.x);
+    const cross = (d) => upDir * (d.y / maxY) * extent;
+    // Caller-supplied d3 curve factory wins; otherwise a monotone curve for the
+    // along-axis (won't overshoot the baseline, since a density is non-negative).
+    const c = curve || (horizontal ? curveMonotoneX : curveMonotoneY);
+    const gen = horizontal
+      ? d3area().x(along).y0(0).y1(cross).curve(c)
+      : d3area().y(along).x0(0).x1(cross).curve(c);
+    return gen(pts) || "";
   }
 
   // Two-tone the scent by the current selection:
@@ -533,9 +631,8 @@ export function zoomableAxisInput(scaleOrDomain, {
     const startPx = horizontal ? ev.clientX : ev.clientY;
     const start = val.slice();
     const win = start[1] - start[0];
-    const [d0, d1] = scale.domain();
     const r = scale.range();
-    const dataPerPx = (d1 - d0) / (r[r.length - 1] - r[0]);
+    const dataPerPx = (dMax - dMin) / (r[r.length - 1] - r[0]);
     band.setPointerCapture(ev.pointerId);
     const move = (e) => {
       const dPx = (horizontal ? e.clientX : e.clientY) - startPx;
