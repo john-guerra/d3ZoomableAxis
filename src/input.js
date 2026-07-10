@@ -260,9 +260,10 @@ export function zoomableAxisInput(scaleOrDomain, {
   //   For violins/areas, style defaults to "kde" (smooth via fast-kde); "bars" keeps
   //   the mirrored-bars look. Histograms are always bars. "area" is a one-sided fill.
   //
-  //   Optional built-in settings popover:
-  //     controls?:   true → render a ⚙ gear that live-tunes Shape/Curve/Smoothing
-  //                  (adjust)/Pad/Bins/Height, redrawing the scent in place.
+  //   Built-in settings popover:
+  //     controls?:   a ⚙ gear that live-tunes Shape/Curve/Smoothing (adjust)/Pad/
+  //                  Bins/Height, redrawing the scent in place. ON by default for
+  //                  any scented axis; pass controls:false to suppress it.
   //     persistKey?: localStorage key to remember the tuned params across sessions
   //                  (omit for no persistence). Every change also fires a "scent"
   //                  event ({type,curve,adjust,pad,bins,size}) via .on("scent", …),
@@ -867,8 +868,9 @@ export function zoomableAxisInput(scaleOrDomain, {
     listeners.call("scent", el, pickScent(scentParams));
   }
 
-  // Optional in-widget settings popover (scent.controls) to live-tune the density.
-  if (scentParams && scent.controls) buildScentControls();
+  // In-widget settings popover to live-tune the density. On by default for any
+  // scented axis; pass scent.controls:false to suppress it.
+  if (scentParams && scent.controls !== false) buildScentControls();
   function buildScentControls() {
     const defaults = pickScent(scent); // caller's params = the "Reset" target
     const gear = document.createElement("button");
