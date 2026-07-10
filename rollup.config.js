@@ -2,6 +2,8 @@ import { nodeResolve } from "@rollup/plugin-node-resolve";
 import terser from "@rollup/plugin-terser";
 import * as meta from "./package.json" with { type: "json" };
 
+// Builds the UMD bundle from the CORE entry (src/index.js) only — the accessible
+// widget layer ships as ESM at ./input, not in this global bundle.
 // Externalize sibling d3-* modules (and the optional reactive-widget-helper) so
 // the UMD bundle expects a shared global `d3` and we don't ship duplicate d3 code.
 const external = Object.keys({ ...meta.default.dependencies, ...meta.default.peerDependencies });
