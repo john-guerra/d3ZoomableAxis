@@ -38,10 +38,16 @@ function injectStyles() {
   if (stylesInjected || typeof document === "undefined") return;
   stylesInjected = true;
   const css = `
-.zoomable-axis-input { position: relative; font: 10px sans-serif; --za-accent: #4682b4; z-index: 0; }
+.zoomable-axis-input { position: relative; font: 10px sans-serif; --za-accent: #4682b4; z-index: 0;
+  -webkit-user-select: none; user-select: none; }
 .zoomable-axis-input:focus-within { z-index: 10; }
+/* Axis is decorative: never selectable, never intercepts a drag (so dragging
+   across the tick labels pans/resizes instead of selecting their text). */
+.zoomable-axis-input .za-axis { pointer-events: none; }
 .zoomable-axis-input .za-axis path,
 .zoomable-axis-input .za-axis line { stroke: #bbb; }
+/* The double-click value editor is a real text field — re-enable selection. */
+.zoomable-axis-input input { -webkit-user-select: text; user-select: text; }
 .zoomable-axis-input input[type=range] {
   position: absolute; margin: 0; background: transparent; pointer-events: none;
   -webkit-appearance: none; appearance: none;
@@ -77,11 +83,15 @@ function injectStyles() {
 .zoomable-axis-input .za-handle.focused .za-handle-stem { stroke-width: 3; filter: drop-shadow(0 0 3px var(--za-accent)); }
 .zoomable-axis-input .za-handle.focused .za-knob,
 .zoomable-axis-input .za-handle.za-dragging .za-knob { stroke-width: 2; filter: drop-shadow(0 0 3px var(--za-accent)); }
-/* Pan band: z-index 2 keeps it above the (pointer-inert) inputs so the region
-   BETWEEN the knobs reliably grabs to pan the whole window. */
-.zoomable-axis-input .za-selected { position: absolute; z-index: 2; background: var(--za-accent); opacity: .25; cursor: move; }
+/* Pan HIT AREA — a big, easy-to-grab layer spanning the selection interior and
+   full body height. z-index 2 keeps it above the pointer-inert inputs so the
+   region between the knobs reliably grabs to pan. It is transparent/translucent
+   so it never tints the sparkline beneath. */
+.zoomable-axis-input .za-selected { position: absolute; z-index: 2; background: var(--za-accent); opacity: .12; cursor: move; }
 .zoomable-axis-input .za-selected:active { cursor: grabbing; }
-.zoomable-axis-input .za-selected.za-thin { background: var(--za-accent); opacity: .08; }
+/* Scented widgets have a separate visible marker (.za-band-line), so the hit
+   layer is fully transparent — a pure grab zone that muddies no colors. */
+.zoomable-axis-input .za-selected.za-thin { background: transparent; opacity: 1; }
 .zoomable-axis-input .za-band-line { position: absolute; background: var(--za-accent); opacity: .9; pointer-events: none; border-radius: 1px; }
 /* Badge: pill-shaped note head at the tip of the stem. Draggable, double-click to edit. */
 .zoomable-axis-input .za-value {
@@ -428,21 +438,22 @@ export function zoomableAxisInput(scaleOrDomain, {
     const MIN_PAN = 10; // px; below this there's no room to pan between endpoints
     const bLo = Math.min(g.loPx, g.hiPx), bHi = Math.max(g.loPx, g.hiPx);
     const bStart = bLo + INNER_PAD, bLen = bHi - bLo - 2 * INNER_PAD;
-    const BAND_THICK = 5; // px — a slim pan strip sitting on the axis line
+    // Big grab area (full body height) for comfortable panning; it's transparent
+    // for scented widgets (see CSS) so the thin .za-band-line stays the visible
+    // marker and the sparkline colors show through unmuddied.
     if (bLen < MIN_PAN) {
       band.style.display = "none";
     } else {
       band.style.display = "block";
-      const cross = margin + thickness / 2 - BAND_THICK / 2; // center on axis line
       if (horizontal) {
         band.style.left = `${margin + bStart}px`;
-        band.style.top = `${cross}px`;
+        band.style.top = `${margin}px`;
         band.style.width = `${bLen}px`;
-        band.style.height = `${BAND_THICK}px`;
+        band.style.height = `${thickness}px`;
       } else {
-        band.style.left = `${cross}px`;
+        band.style.left = `${margin}px`;
         band.style.top = `${margin + bStart}px`;
-        band.style.width = `${BAND_THICK}px`;
+        band.style.width = `${thickness}px`;
         band.style.height = `${bLen}px`;
       }
     }
