@@ -10,6 +10,8 @@
       "d3-scale": "../node_modules/d3-scale/src/index.js",
       "d3-axis": "../node_modules/d3-axis/src/index.js",
       "d3-brush": "../node_modules/d3-brush/src/index.js",
+      "d3-shape": "../node_modules/d3-shape/src/index.js",
+      "d3-path": "../node_modules/d3-path/src/index.js",
       "d3-dispatch": "../node_modules/d3-dispatch/src/index.js",
       "d3-color": "../node_modules/d3-color/src/index.js",
       "d3-format": "../node_modules/d3-format/src/index.js",
@@ -54,8 +56,16 @@
     const plotW = 500;
     const AXMARGIN = 22, AXTHICK = 44;
 
+    // synthetic bimodal sample so the scent (histogram/violin, uses d3-shape) renders
+    const sample = [];
+    for (let i = 0; i < 400; i++) {
+      const g = Math.random() < 0.5 ? 30 : 65;
+      sample.push(Math.max(0, Math.min(100, g + (Math.random() - 0.5) * 24)));
+    }
+
     const xAxis = zoomableAxisInput(scaleLinear().domain(xDomain), {
       orient: "bottom", step: 1, length: plotW, value: [20, 70], label: "Value", units: "u",
+      scent: { values: sample, type: "histogram", bins: 28 },
     });
     xAxis.style.position = "absolute";
     xAxis.style.left = `${AXMARGIN}px`;
@@ -73,6 +83,7 @@
 
     const yAxis = zoomableAxisInput(scaleLinear().domain(yDomain), {
       orient: "left", step: 1, length: plotH, value: [20, 70], label: "Value", units: "u",
+      scent: { values: sample, type: "violin", bins: 28 },
     });
     yAxis.style.position = "absolute";
     yAxis.style.left = `60px`;
