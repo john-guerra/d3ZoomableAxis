@@ -1,0 +1,646 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Design C — Inline Sticker · d3-zoomable-axis</title>
+  <script type="importmap">
+  {
+    "imports": {
+      "d3-selection": "https://esm.sh/d3-selection@3",
+      "d3-scale": "https://esm.sh/d3-scale@4",
+      "d3-axis": "https://esm.sh/d3-axis@3",
+      "d3-brush": "https://esm.sh/d3-brush@3",
+      "d3-dispatch": "https://esm.sh/d3-dispatch@3",
+      "fast-kde": "https://esm.sh/fast-kde@0.2.2",
+      "reactive-widget-helper": "https://esm.sh/reactive-widget-helper@0.0.3"
+    }
+  }
+  </script>
+
+  <style>
+    /* ── Page chrome ─────────────────────────────────────────────── */
+    @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,700;1,9..144,300&display=swap');
+
+    *, *::before, *::after { box-sizing: border-box; }
+
+    :root {
+      --ink:   #1a1a2e;
+      --mist:  #f0f4f8;
+      --lo:    #2c5f8a;   /* darker steel — lo handle */
+      --hi:    #4682b4;   /* steel blue   — hi handle */
+      --hi-fg: #fff;
+      --lo-fg: #fff;
+      --radius: 5px;
+      --axis-line: #bbb;
+    }
+
+    body {
+      margin: 0;
+      padding: 3rem 3.5rem 4rem;
+      background: var(--mist);
+      color: var(--ink);
+      font-family: 'DM Mono', monospace;
+      font-size: 13px;
+      min-height: 100vh;
+    }
+
+    .page-header {
+      display: flex;
+      align-items: baseline;
+      gap: 1.2rem;
+      margin-bottom: 0.3rem;
+    }
+
+    h1 {
+      font-family: 'Fraunces', Georgia, serif;
+      font-size: 2rem;
+      font-weight: 300;
+      letter-spacing: -0.02em;
+      margin: 0;
+    }
+    h1 em { font-style: italic; font-weight: 700; color: var(--hi); }
+
+    .badge-c {
+      background: var(--hi);
+      color: #fff;
+      font: 500 10px/1 'DM Mono', monospace;
+      letter-spacing: .08em;
+      padding: 3px 7px;
+      border-radius: 3px;
+      text-transform: uppercase;
+      align-self: center;
+    }
+
+    .subtitle {
+      font-family: 'Fraunces', serif;
+      font-style: italic;
+      font-weight: 300;
+      font-size: 1.05rem;
+      color: #5a6474;
+      margin: 0 0 2.5rem;
+    }
+
+    .demo-row {
+      display: flex;
+      gap: 4rem;
+      align-items: flex-start;
+    }
+
+    /* ── Plot card ───────────────────────────────────────────────── */
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 2rem 2rem 1.6rem;
+      box-shadow: 0 2px 16px rgba(70,130,180,.10), 0 1px 3px rgba(0,0,0,.06);
+    }
+
+    .card-label {
+      font: 500 10px/1 'DM Mono', monospace;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: #8a9ab0;
+      margin-bottom: 1.2rem;
+    }
+
+    #plotWrap { position: relative; margin-top: 1rem; }
+
+    /* ── Right-side annotation ───────────────────────────────────── */
+    .annotation {
+      flex: 0 0 260px;
+      padding-top: 1.5rem;
+    }
+
+    .annotation h2 {
+      font-family: 'Fraunces', serif;
+      font-weight: 700;
+      font-size: 1.15rem;
+      margin: 0 0 0.5rem;
+      color: var(--ink);
+    }
+
+    .annotation p {
+      font-family: 'Fraunces', serif;
+      font-style: italic;
+      font-weight: 300;
+      font-size: 0.92rem;
+      line-height: 1.7;
+      color: #5a6474;
+      margin: 0 0 1.5rem;
+    }
+
+    .diagram {
+      background: #f7f9fc;
+      border: 1px solid #dde4ed;
+      border-radius: 8px;
+      padding: 1rem 1.2rem;
+      font-size: 11px;
+      line-height: 1.8;
+      white-space: pre;
+      color: #445;
+      font-family: 'DM Mono', monospace;
+    }
+
+    .output {
+      margin-top: 1.6rem;
+      font-size: 11px;
+      color: #6a7a8a;
+      letter-spacing: .03em;
+    }
+    .output strong { color: var(--hi); }
+
+    /* ── Inline-sticker handle styles ───────────────────────────── */
+    .inline-sticker {
+      position: absolute;
+      transform: translate(-50%, -50%);
+      pointer-events: auto;
+      cursor: grab;
+      white-space: nowrap;
+      border-radius: var(--radius);
+      padding: 3px 9px;
+      font: 600 11px/1.5 'DM Mono', monospace;
+      user-select: none;
+      -webkit-user-select: none;
+      transition: box-shadow 0.12s ease, background 0.1s ease, color 0.1s ease;
+    }
+    .inline-sticker:active { cursor: grabbing; }
+
+    /* lo: filled solid */
+    .inline-sticker.lo {
+      background: var(--lo);
+      color: var(--lo-fg);
+      border: 2px solid var(--lo);
+      box-shadow: 0 2px 8px rgba(44,95,138,.35);
+    }
+    .inline-sticker.lo:hover {
+      background: #1e4a6e;
+      border-color: #1e4a6e;
+      box-shadow: 0 3px 12px rgba(44,95,138,.5);
+    }
+
+    /* hi: outline with fill on hover */
+    .inline-sticker.hi {
+      background: #fff;
+      color: var(--hi);
+      border: 2px solid var(--hi);
+      box-shadow: 0 2px 8px rgba(70,130,180,.25);
+    }
+    .inline-sticker.hi:hover {
+      background: var(--hi);
+      color: #fff;
+      box-shadow: 0 3px 12px rgba(70,130,180,.45);
+    }
+
+    /* editing state */
+    .inline-sticker.editing {
+      cursor: text;
+      background: #fff !important;
+      color: var(--ink) !important;
+      border-color: var(--hi) !important;
+      box-shadow: 0 0 0 3px rgba(70,130,180,.2) !important;
+      padding: 2px 6px;
+    }
+
+    .sticker-input {
+      background: transparent;
+      border: none;
+      outline: none;
+      width: 52px;
+      font: 600 11px/1.5 'DM Mono', monospace;
+      color: var(--ink);
+      text-align: center;
+      padding: 0;
+    }
+  </style>
+</head>
+<body>
+
+<div class="page-header">
+  <h1>Design <em>C</em></h1>
+  <span class="badge-c">Inline Sticker</span>
+</div>
+<p class="subtitle">Each handle is a compact rounded-rectangle "sticker" that straddles the axis line — like a highway milepost embedded in the road.</p>
+
+<div class="demo-row">
+  <div class="card">
+    <div class="card-label">Penguins — Flipper length × Body mass</div>
+    <div id="plotWrap"></div>
+    <p class="output" id="out">—</p>
+  </div>
+
+  <div class="annotation">
+    <h2>Sticker handles</h2>
+    <p>The axis line visually "runs through" each sticker because the sticker sits ON the line with a white background. No separate thumb or badge needed — the sticker IS the handle.</p>
+
+    <div class="diagram">  ┌────────────┐
+  │  172 mm    │
+──┼────────────┼──
+  └────────────┘
+
+  <span style="color:var(--lo)">■ lo</span>  filled solid
+  <span style="color:var(--hi)">□ hi</span>  outline only</div>
+
+    <p style="margin-top:1.2rem">Drag any sticker to move. Double-click to type a value directly. Drag the blue band between them to pan.</p>
+  </div>
+</div>
+
+<!-- ═══ Variant 2: without scent ═══ -->
+<h2 style="font-family:'Fraunces',serif;font-weight:300;font-size:1.3rem;margin-top:4rem 0 0.3rem;letter-spacing:-.01em">Without distribution scent</h2>
+<p style="font-family:'Fraunces',serif;font-style:italic;font-weight:300;color:#5a6474;margin:.3rem 0 1rem">Same sticker handles, no histogram overlay.</p>
+<div class="card" style="display:inline-block">
+  <div id="plotWrap2" style="position:relative;margin-top:.5rem"></div>
+  <p class="output" id="out2">—</p>
+</div>
+
+
+<script type="module">
+  import { select } from "d3-selection";
+  import { scaleLinear } from "d3-scale";
+  import { zoomableAxisInput } from "../src/input.js";
+
+  /* ─── constants ─────────────────────────────────────────────── */
+  const X = "Flipper Length (mm)", Y = "Body Mass (g)";
+  const COLORS = { "Adelie": "#ff8c00", "Chinstrap": "#9932cc", "Gentoo": "#008080" };
+  const species = (d) => (d.Species || "").split(" ")[0];
+
+  const raw = await fetch("https://cdn.jsdelivr.net/npm/vega-datasets@2/data/penguins.json").then(r => r.json());
+  const data = raw.filter(d => d[X] != null && d[Y] != null);
+
+  const plotW = 460, plotH = 360, vAxis = 64, hAxis = 56;
+  const AXMARGIN = 22, AXTHICK = 44;
+  const axLine = AXMARGIN + AXTHICK / 2; // = 44 — where axis line sits within component
+
+  const xExtent = [Math.min(...data.map(d => d[X])), Math.max(...data.map(d => d[X]))];
+  const yExtent = [Math.min(...data.map(d => d[Y])), Math.max(...data.map(d => d[Y]))];
+
+  const x = scaleLinear().domain(xExtent).range([0, plotW]);
+  const y = scaleLinear().domain(yExtent).range([plotH, 0]);
+
+  /* ─── scatter plot ───────────────────────────────────────────── */
+  const wrap = select("#plotWrap")
+    .style("width", `${vAxis + plotW + 30}px`)
+    .style("height", `${plotH + hAxis + 30}px`);
+
+  const svg = wrap.append("svg")
+    .style("position", "absolute").style("left", `${vAxis}px`).style("top", "0")
+    .style("z-index", "2").style("pointer-events", "none")
+    .attr("width", plotW + 20).attr("height", plotH + 20);
+  svg.append("clipPath").attr("id", "plotClip").append("rect").attr("width", plotW).attr("height", plotH);
+  const gPts = svg.append("g").attr("clip-path", "url(#plotClip)");
+  svg.append("rect").attr("width", plotW).attr("height", plotH)
+    .attr("fill", "none").attr("stroke", "#dde4ed").attr("stroke-width", 1.5);
+
+  function draw() {
+    gPts.selectAll("circle").data(data).join("circle")
+      .attr("r", 3.5).attr("fill-opacity", 0.72)
+      .attr("fill", d => COLORS[species(d)] || "#888")
+      .attr("cx", d => x(d[X])).attr("cy", d => y(d[Y]));
+  }
+  draw();
+
+  /* ─── axes ───────────────────────────────────────────────────── */
+  const xAxis = zoomableAxisInput(scaleLinear().domain(xExtent), {
+    orient: "bottom", step: 1, length: plotW, value: xExtent, label: "Flipper length", units: "mm",
+    scent: { values: data.map(d => d[X]), type: "histogram", bins: 28 },
+  });
+  xAxis.style.position = "absolute";
+  xAxis.style.left = `${vAxis - AXMARGIN}px`;
+  xAxis.style.top = `${plotH - axLine}px`;
+  xAxis.addEventListener("input", () => { x.domain(xAxis.value); draw(); report(); });
+  wrap.node().appendChild(xAxis);
+
+  const yAxis = zoomableAxisInput(scaleLinear().domain(yExtent), {
+    orient: "left", step: 25, length: plotH, value: [3500, 6000], label: "Body mass", units: "g",
+    scent: { values: data.map(d => d[Y]), type: "violin", bins: 28 },
+  });
+  y.domain([3500, 6000]);
+  yAxis.style.position = "absolute";
+  yAxis.style.left = `${vAxis - axLine}px`;
+  yAxis.style.top = `${-AXMARGIN}px`;
+  yAxis.addEventListener("input", () => { y.domain(yAxis.value); draw(); report(); });
+  wrap.node().appendChild(yAxis);
+
+  /* ─── sticker overlay ────────────────────────────────────────── */
+  // Hide the built-in SVG D-shape handles and value badges (we replace both)
+  xAxis.querySelectorAll('.za-handles-svg').forEach(s => s.style.opacity = '0');
+  yAxis.querySelectorAll('.za-handles-svg').forEach(s => s.style.opacity = '0');
+  xAxis.querySelectorAll('.za-value').forEach(v => v.style.display = 'none');
+  yAxis.querySelectorAll('.za-value').forEach(v => v.style.display = 'none');
+
+  /* geometry helpers */
+  // The axis line within xAxis component is at y = axLine = 44px from component top
+  const X_AXIS_Y = axLine;                   // sticker vertical center in xAxis component
+  // The axis line within yAxis component is at x = axLine = 44px from component left
+  const Y_AXIS_X = axLine;                   // sticker horizontal center in yAxis component
+
+  /* pixel-per-unit for drag mapping */
+  const xPxPerUnit = plotW / (xExtent[1] - xExtent[0]);
+  const yPxPerUnit = plotH / (yExtent[1] - yExtent[0]);
+
+  /* read handle position (px in component) from badge left/top */
+  function getHandlePx(axisEl, orient) {
+    const badges = axisEl.querySelectorAll('.za-value');
+    if (badges.length < 2) return [AXMARGIN, AXMARGIN + 40];
+    if (orient === 'horizontal') {
+      return [parseFloat(badges[0].style.left), parseFloat(badges[1].style.left)];
+    } else {
+      return [parseFloat(badges[0].style.top), parseFloat(badges[1].style.top)];
+    }
+  }
+
+  /* format helpers */
+  const fmtX = v => `${Math.round(v)} mm`;
+  const fmtY = v => `${Math.round(v / 25) * 25} g`;
+
+  /* create a sticker div */
+  function makeSticker(axisEl, which, cls, orient) {
+    const s = document.createElement('div');
+    s.className = `inline-sticker ${which} ${cls}`;
+    s.dataset.which = which;
+    s.dataset.orient = orient;
+    axisEl.style.position = 'relative'; // ensure positioning context
+    axisEl.appendChild(s);
+    return s;
+  }
+
+  /* attach drag & dbl-click to a sticker */
+  function attachInteraction(sticker, axisEl, which, rangeInputSelector, orient) {
+    const inputs = axisEl.querySelectorAll('input[type=range]');
+    // lo input = first, hi input = second (per source; they share the same min/max)
+    const rangeInput = inputs[which === 'lo' ? 0 : 1];
+
+    /* drag */
+    sticker.addEventListener('pointerdown', e => {
+      if (e.target.tagName === 'INPUT') return; // inline edit active
+      e.preventDefault();
+      sticker.setPointerCapture(e.pointerId);
+      const startClient = orient === 'horizontal' ? e.clientX : e.clientY;
+      const startVal = parseFloat(rangeInput.value);
+      const pxPerUnit = orient === 'horizontal' ? xPxPerUnit : yPxPerUnit;
+      const sign = orient === 'horizontal' ? 1 : -1; // y-axis is inverted
+
+      function onMove(mv) {
+        const delta = (orient === 'horizontal' ? mv.clientX : mv.clientY) - startClient;
+        const newVal = Math.max(+rangeInput.min, Math.min(+rangeInput.max,
+          startVal + sign * delta / pxPerUnit));
+        rangeInput.value = newVal;
+        rangeInput.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      function onUp() {
+        sticker.releasePointerCapture(e.pointerId);
+        sticker.removeEventListener('pointermove', onMove);
+        sticker.removeEventListener('pointerup', onUp);
+      }
+      sticker.addEventListener('pointermove', onMove);
+      sticker.addEventListener('pointerup', onUp);
+    });
+
+    /* double-click to edit inline */
+    sticker.addEventListener('dblclick', e => {
+      e.stopPropagation();
+      sticker.classList.add('editing');
+      const currentVal = parseFloat(rangeInput.value);
+      sticker.innerHTML = '';
+      const inp = document.createElement('input');
+      inp.type = 'number';
+      inp.className = 'sticker-input';
+      inp.value = Math.round(currentVal);
+      inp.min = rangeInput.min;
+      inp.max = rangeInput.max;
+      sticker.appendChild(inp);
+      inp.focus();
+      inp.select();
+
+      function commit() {
+        const v = Math.max(+rangeInput.min, Math.min(+rangeInput.max, parseFloat(inp.value) || currentVal));
+        rangeInput.value = v;
+        rangeInput.dispatchEvent(new Event('input', { bubbles: true }));
+        sticker.classList.remove('editing');
+      }
+      inp.addEventListener('blur', commit);
+      inp.addEventListener('keydown', ev => {
+        if (ev.key === 'Enter') { ev.preventDefault(); inp.blur(); }
+        if (ev.key === 'Escape') { inp.value = currentVal; inp.blur(); }
+      });
+    });
+  }
+
+  /* build stickers and attach update logic */
+  function buildStickers(axisEl, orient) {
+    const loSticker = makeSticker(axisEl, 'lo', '', orient);
+    const hiSticker = makeSticker(axisEl, 'hi', '', orient);
+
+    attachInteraction(loSticker, axisEl, 'lo', null, orient);
+    attachInteraction(hiSticker, axisEl, 'hi', null, orient);
+
+    function update() {
+      if (loSticker.classList.contains('editing') || hiSticker.classList.contains('editing')) return;
+      const [loPx, hiPx] = getHandlePx(axisEl, orient);
+      if (orient === 'horizontal') {
+        const fmt = fmtX;
+        const inputs = axisEl.querySelectorAll('input[type=range]');
+        loSticker.textContent = fmt(parseFloat(inputs[0].value));
+        hiSticker.textContent = fmt(parseFloat(inputs[1].value));
+        loSticker.style.left = `${loPx}px`;
+        loSticker.style.top = `${X_AXIS_Y}px`;
+        hiSticker.style.left = `${hiPx}px`;
+        hiSticker.style.top = `${X_AXIS_Y}px`;
+      } else {
+        const fmt = fmtY;
+        const inputs = axisEl.querySelectorAll('input[type=range]');
+        loSticker.textContent = fmt(parseFloat(inputs[0].value));
+        hiSticker.textContent = fmt(parseFloat(inputs[1].value));
+        loSticker.style.left = `${Y_AXIS_X}px`;
+        loSticker.style.top = `${loPx}px`;
+        hiSticker.style.left = `${Y_AXIS_X}px`;
+        hiSticker.style.top = `${hiPx}px`;
+      }
+    }
+
+    // update on every axis input event
+    axisEl.addEventListener('input', update);
+    // initial position: wait one frame so badges have been laid out
+    requestAnimationFrame(update);
+    return { loSticker, hiSticker, update };
+  }
+
+  const xStickers = buildStickers(xAxis, 'horizontal');
+  const yStickers = buildStickers(yAxis, 'vertical');
+
+  const out = document.getElementById("out");
+  function report() {
+    out.innerHTML = `x (flipper) = <strong>[${xAxis.value.map(v => v.toFixed(0)).join(', ')}] mm</strong>&nbsp;&nbsp;·&nbsp;&nbsp;y (mass) = <strong>[${yAxis.value.map(v => v.toFixed(0)).join(', ')}] g</strong>&nbsp;&nbsp;·&nbsp;&nbsp;${data.length} penguins`;
+    xStickers.update();
+    yStickers.update();
+  }
+  report();
+
+  window.__demo = { xAxis, yAxis, x, y };
+</script>
+
+
+<!-- ═══ Variant 2 (no scent) ════════════════════════════════════ -->
+<script type="module">
+  import { select } from "d3-selection";
+  import { scaleLinear } from "d3-scale";
+  import { zoomableAxisInput } from "../src/input.js";
+
+  const X = "Flipper Length (mm)", Y = "Body Mass (g)";
+  const COLORS = { "Adelie": "#ff8c00", "Chinstrap": "#9932cc", "Gentoo": "#008080" };
+  const species = (d) => (d.Species || "").split(" ")[0];
+  const raw = await fetch("https://cdn.jsdelivr.net/npm/vega-datasets@2/data/penguins.json").then(r => r.json());
+  const data = raw.filter(d => d[X] != null && d[Y] != null);
+
+  const plotW = 460, plotH = 360, vAxis = 64;
+  const AXMARGIN = 22, AXTHICK = 44, axLine = AXMARGIN + AXTHICK / 2;
+  const xExtent = [Math.min(...data.map(d => d[X])), Math.max(...data.map(d => d[X]))];
+  const yExtent = [Math.min(...data.map(d => d[Y])), Math.max(...data.map(d => d[Y]))];
+  const x = scaleLinear().domain(xExtent).range([0, plotW]);
+  const y = scaleLinear().domain(yExtent).range([plotH, 0]);
+
+  const wrap = select("#plotWrap2")
+    .style("width", `${vAxis + plotW + 30}px`)
+    .style("height", `${plotH + 80}px`);
+  const svg = wrap.append("svg")
+    .style("position","absolute").style("left",`${vAxis}px`).style("top","0")
+    .style("z-index","2").style("pointer-events","none")
+    .attr("width", plotW + 20).attr("height", plotH + 20);
+  svg.append("clipPath").attr("id","plotClip2").append("rect").attr("width",plotW).attr("height",plotH);
+  const gPts = svg.append("g").attr("clip-path","url(#plotClip2)");
+  svg.append("rect").attr("width",plotW).attr("height",plotH)
+    .attr("fill","none").attr("stroke","#dde4ed").attr("stroke-width",1.5);
+
+  const draw = () => gPts.selectAll("circle").data(data).join("circle")
+    .attr("r",3.5).attr("fill-opacity",.72).attr("fill",d=>COLORS[species(d)]||"#888")
+    .attr("cx",d=>x(d[X])).attr("cy",d=>y(d[Y]));
+  draw();
+
+  const xAxis = zoomableAxisInput(scaleLinear().domain(xExtent), {
+    orient:"bottom", step:1, length:plotW, value:xExtent, label:"Flipper length", units:"mm"
+  });
+  xAxis.style.position="absolute"; xAxis.style.left=`${vAxis-AXMARGIN}px`; xAxis.style.top=`${plotH-axLine}px`;
+  xAxis.addEventListener("input", () => { x.domain(xAxis.value); draw(); document.getElementById("out2").textContent=`x=[${xAxis.value.map(v=>v.toFixed(0))}]`; });
+  wrap.node().appendChild(xAxis);
+
+  const yAxis = zoomableAxisInput(scaleLinear().domain(yExtent), {
+    orient:"left", step:25, length:plotH, value:[3500,6000], label:"Body mass", units:"g"
+  });
+  y.domain([3500,6000]);
+  yAxis.style.position="absolute"; yAxis.style.left=`${vAxis-axLine}px`; yAxis.style.top=`${-AXMARGIN}px`;
+  yAxis.addEventListener("input", () => { y.domain(yAxis.value); draw(); });
+  wrap.node().appendChild(yAxis);
+
+  // hide built-in handles and badges
+  xAxis.querySelectorAll('.za-handles-svg').forEach(s => s.style.opacity = '0');
+  yAxis.querySelectorAll('.za-handles-svg').forEach(s => s.style.opacity = '0');
+  xAxis.querySelectorAll('.za-value').forEach(v => v.style.display = 'none');
+  yAxis.querySelectorAll('.za-value').forEach(v => v.style.display = 'none');
+
+  const xPxPerUnit = plotW / (xExtent[1] - xExtent[0]);
+  const yPxPerUnit = plotH / (yExtent[1] - yExtent[0]);
+  const X_AXIS_Y = axLine;
+  const Y_AXIS_X = axLine;
+
+  function getHandlePx(axisEl, orient) {
+    const badges = axisEl.querySelectorAll('.za-value');
+    if (badges.length < 2) return [AXMARGIN, AXMARGIN + 40];
+    if (orient === 'horizontal') {
+      return [parseFloat(badges[0].style.left), parseFloat(badges[1].style.left)];
+    } else {
+      return [parseFloat(badges[0].style.top), parseFloat(badges[1].style.top)];
+    }
+  }
+
+  function makeSticker2(axisEl, which) {
+    const s = document.createElement('div');
+    s.className = `inline-sticker ${which}`;
+    axisEl.appendChild(s);
+    return s;
+  }
+
+  function attachInteraction2(sticker, axisEl, which, orient) {
+    const inputs = axisEl.querySelectorAll('input[type=range]');
+    const rangeInput = inputs[which === 'lo' ? 0 : 1];
+    sticker.addEventListener('pointerdown', e => {
+      if (e.target.tagName === 'INPUT') return;
+      e.preventDefault();
+      sticker.setPointerCapture(e.pointerId);
+      const startClient = orient === 'horizontal' ? e.clientX : e.clientY;
+      const startVal = parseFloat(rangeInput.value);
+      const pxPerUnit = orient === 'horizontal' ? xPxPerUnit : yPxPerUnit;
+      const sign = orient === 'horizontal' ? 1 : -1;
+      function onMove(mv) {
+        const delta = (orient === 'horizontal' ? mv.clientX : mv.clientY) - startClient;
+        const newVal = Math.max(+rangeInput.min, Math.min(+rangeInput.max,
+          startVal + sign * delta / pxPerUnit));
+        rangeInput.value = newVal;
+        rangeInput.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      function onUp() {
+        sticker.releasePointerCapture(e.pointerId);
+        sticker.removeEventListener('pointermove', onMove);
+        sticker.removeEventListener('pointerup', onUp);
+      }
+      sticker.addEventListener('pointermove', onMove);
+      sticker.addEventListener('pointerup', onUp);
+    });
+    sticker.addEventListener('dblclick', e => {
+      e.stopPropagation();
+      sticker.classList.add('editing');
+      const currentVal = parseFloat(rangeInput.value);
+      sticker.innerHTML = '';
+      const inp = document.createElement('input');
+      inp.type = 'number';
+      inp.className = 'sticker-input';
+      inp.value = Math.round(currentVal);
+      inp.min = rangeInput.min;
+      inp.max = rangeInput.max;
+      sticker.appendChild(inp);
+      inp.focus(); inp.select();
+      function commit() {
+        const v = Math.max(+rangeInput.min, Math.min(+rangeInput.max, parseFloat(inp.value) || currentVal));
+        rangeInput.value = v;
+        rangeInput.dispatchEvent(new Event('input', { bubbles: true }));
+        sticker.classList.remove('editing');
+      }
+      inp.addEventListener('blur', commit);
+      inp.addEventListener('keydown', ev => {
+        if (ev.key === 'Enter') { ev.preventDefault(); inp.blur(); }
+        if (ev.key === 'Escape') { inp.value = currentVal; inp.blur(); }
+      });
+    });
+  }
+
+  function buildStickers2(axisEl, orient) {
+    const loSticker = makeSticker2(axisEl, 'lo');
+    const hiSticker = makeSticker2(axisEl, 'hi');
+    attachInteraction2(loSticker, axisEl, 'lo', orient);
+    attachInteraction2(hiSticker, axisEl, 'hi', orient);
+
+    function update() {
+      if (loSticker.classList.contains('editing') || hiSticker.classList.contains('editing')) return;
+      const [loPx, hiPx] = getHandlePx(axisEl, orient);
+      const inputs = axisEl.querySelectorAll('input[type=range]');
+      if (orient === 'horizontal') {
+        loSticker.textContent = `${Math.round(parseFloat(inputs[0].value))} mm`;
+        hiSticker.textContent = `${Math.round(parseFloat(inputs[1].value))} mm`;
+        loSticker.style.left = `${loPx}px`; loSticker.style.top = `${X_AXIS_Y}px`;
+        hiSticker.style.left = `${hiPx}px`; hiSticker.style.top = `${X_AXIS_Y}px`;
+      } else {
+        loSticker.textContent = `${Math.round(parseFloat(inputs[0].value))} g`;
+        hiSticker.textContent = `${Math.round(parseFloat(inputs[1].value))} g`;
+        loSticker.style.left = `${Y_AXIS_X}px`; loSticker.style.top = `${loPx}px`;
+        hiSticker.style.left = `${Y_AXIS_X}px`; hiSticker.style.top = `${hiPx}px`;
+      }
+    }
+    axisEl.addEventListener('input', update);
+    requestAnimationFrame(update);
+    return { update };
+  }
+
+  buildStickers2(xAxis, 'horizontal');
+  buildStickers2(yAxis, 'vertical');
+</script>
+
+</body>
+</html>

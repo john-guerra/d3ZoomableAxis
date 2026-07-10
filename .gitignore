@@ -4,3 +4,10 @@ dist/
 .DS_Store
 .observablehq/
 resources/
+
+# Browser-automation scratch artifacts
+.playwright-mcp/
+
+# Ad-hoc verification screenshots
+/*.png
+docs/*.png

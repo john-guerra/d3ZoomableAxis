@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>d3-zoomable-axis — Design A: Balloon Pin</title>
+  <script type="importmap">
+  {
+    "imports": {
+      "d3-selection": "https://esm.sh/d3-selection@3",
+      "d3-scale": "https://esm.sh/d3-scale@4",
+      "d3-axis": "https://esm.sh/d3-axis@3",
+      "d3-brush": "https://esm.sh/d3-brush@3",
+      "d3-dispatch": "https://esm.sh/d3-dispatch@3",
+      "fast-kde": "https://esm.sh/fast-kde@0.2.2",
+      "reactive-widget-helper": "https://esm.sh/reactive-widget-helper@0.0.3"
+    }
+  }
+  </script>
+  <style>
+    body { font: 14px/1.5 system-ui, sans-serif; margin: 2rem; max-width: 900px; }
+    .hint { color: #555; }
+    #plotWrap { position: relative; margin-top: 1rem; }
+    .axis text { font: 10px sans-serif; }
+
+    /* ── Balloon Pin styles ── */
+    .balloon-pin {
+      position: absolute;
+      pointer-events: auto;
+      cursor: grab;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      z-index: 20;
+      touch-action: none;
+      user-select: none;
+    }
+    .balloon-pin:active { cursor: grabbing; }
+    .balloon-pin.bp-left {
+      flex-direction: row;
+    }
+
+    .balloon {
+      background: #4682b4;
+      color: white;
+      border-radius: 50%;
+      width: 56px;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font: 600 11px/1.2 sans-serif;
+      text-align: center;
+      box-shadow: 0 2px 8px rgba(0,0,0,.30);
+      user-select: none;
+      flex-shrink: 0;
+      transition: box-shadow 0.15s;
+    }
+    .balloon-pin:hover .balloon {
+      box-shadow: 0 4px 14px rgba(70,130,180,.55);
+    }
+    .balloon input.balloon-edit {
+      width: 44px;
+      border: none;
+      background: transparent;
+      color: white;
+      font: 600 11px sans-serif;
+      text-align: center;
+      outline: none;
+      padding: 0;
+    }
+
+    .bp-stem {
+      background: #4682b4;
+      flex-shrink: 0;
+    }
+    /* Vertical stem (for bottom/top axis) */
+    .bp-stem-v {
+      width: 2px;
+      height: 12px;
+    }
+    /* Horizontal stem (for left/right axis) */
+    .bp-stem-h {
+      height: 2px;
+      width: 12px;
+    }
+
+    /* Diamond tip drawn via border trick */
+    .bp-diamond {
+      width: 6px;
+      height: 6px;
+      background: #4682b4;
+      transform: rotate(45deg);
+      flex-shrink: 0;
+    }
+  </style>
+</head>
+<body>
+  <h1>Design A — Balloon Pin handles</h1>
+  <p class="hint">
+    Each handle is a filled circle (balloon) with white value text. A thin stem connects it to the axis line,
+    ending in a small diamond. Drag the balloon to adjust the selection. Double-click to type a value.
+  </p>
+
+  <div id="plotWrap"></div>
+  <p class="out hint" id="out">—</p>
+
+  <script type="module">
+    import { select } from "d3-selection";
+    import { scaleLinear } from "d3-scale";
+    import { zoomableAxisInput } from "../src/input.js";
+
+    const X = "Flipper Length (mm)", Y = "Body Mass (g)";
+    const COLORS = { "Adelie": "#ff8c00", "Chinstrap": "#9932cc", "Gentoo": "#008080" };
+    const species = (d) => (d.Species || "").split(" ")[0];
+
+    const raw = await fetch("https://cdn.jsdelivr.net/npm/vega-datasets@2/data/penguins.json").then(r => r.json());
+    const data = raw.filter(d => d[X] != null && d[Y] != null);
+
+    const plotW = 460, plotH = 360, vAxis = 64, hAxis = 56;
+    const AXMARGIN = 22, AXTHICK = 44, axLine = AXMARGIN + AXTHICK / 2; // = 44
+    const xExtent = [Math.min(...data.map(d => d[X])), Math.max(...data.map(d => d[X]))];
+    const yExtent = [Math.min(...data.map(d => d[Y])), Math.max(...data.map(d => d[Y]))];
+
+    const x = scaleLinear().domain(xExtent).range([0, plotW]);
+    const y = scaleLinear().domain(yExtent).range([plotH, 0]);
+
+    const wrap = select("#plotWrap")
+      .style("width", `${vAxis + plotW + 30}px`)
+      .style("height", `${plotH + hAxis + 50}px`);
+
+    // scatterplot
+    const svg = wrap.append("svg")
+      .style("position", "absolute").style("left", `${vAxis}px`).style("top", "0")
+      .style("z-index", "2").style("pointer-events", "none")
+      .attr("width", plotW + 20).attr("height", plotH + 20);
+    svg.append("clipPath").attr("id", "plotClip").append("rect").attr("width", plotW).attr("height", plotH);
+    const gPts = svg.append("g").attr("clip-path", "url(#plotClip)");
+    svg.append("rect").attr("width", plotW).attr("height", plotH).attr("fill", "none").attr("stroke", "#ddd");
+
+    function draw() {
+      const c = gPts.selectAll("circle").data(data);
+      c.join("circle")
+        .attr("r", 3.5).attr("fill-opacity", 0.75)
+        .attr("fill", d => COLORS[species(d)] || "#888")
+        .attr("cx", d => x(d[X])).attr("cy", d => y(d[Y]));
+    }
+    draw();
+
+    // x zoomable axis (bottom)
+    const xAxis = zoomableAxisInput(scaleLinear().domain(xExtent), {
+      orient: "bottom", step: 1, length: plotW, value: xExtent, label: "Flipper length", units: "mm",
+      scent: { values: data.map(d => d[X]), type: "histogram", bins: 28 },
+    });
+    xAxis.style.position = "absolute"; xAxis.style.left = `${vAxis - AXMARGIN}px`; xAxis.style.top = `${plotH - axLine}px`;
+    xAxis.addEventListener("input", () => { x.domain(xAxis.value); draw(); report(); });
+    wrap.node().appendChild(xAxis);
+
+    // y zoomable axis (left)
+    const yAxis = zoomableAxisInput(scaleLinear().domain(yExtent), {
+      orient: "left", step: 25, length: plotH, value: [3500, 6000], label: "Body mass", units: "g",
+      scent: { values: data.map(d => d[Y]), type: "violin", bins: 28 },
+    });
+    y.domain([3500, 6000]);
+    yAxis.style.position = "absolute"; yAxis.style.left = `${vAxis - axLine}px`; yAxis.style.top = `${-AXMARGIN}px`;
+    yAxis.addEventListener("input", () => { y.domain(yAxis.value); draw(); report(); });
+    wrap.node().appendChild(yAxis);
+
+    const out = document.getElementById("out");
+    const report = () => out.textContent =
+      `x (flipper) = [${xAxis.value.map(v=>v.toFixed(0))}] mm   ·   y (mass) = [${yAxis.value.map(v=>v.toFixed(0))}] g   ·   ${data.length} penguins`;
+    report();
+
+    // ─────────────────────────────────────────────
+    // BALLOON PIN overlay
+    // ─────────────────────────────────────────────
+
+    // Hide built-in SVG handles and value badges
+    xAxis.querySelectorAll('.za-handles-svg').forEach(s => s.style.opacity = '0');
+    xAxis.querySelectorAll('.za-value').forEach(v => v.style.display = 'none');
+    yAxis.querySelectorAll('.za-handles-svg').forEach(s => s.style.opacity = '0');
+    yAxis.querySelectorAll('.za-value').forEach(v => v.style.display = 'none');
+
+    const STEM = 12; // stem height/width in px
+    const BALLOON_R = 28; // balloon radius (half of 56px)
+
+    // ── Helper: create one balloon pin ──
+    function makeBalloonPin(axisEl, which, orient) {
+      const pin = document.createElement('div');
+      pin.className = 'balloon-pin' + (orient === 'left' ? ' bp-left' : '');
+      pin.dataset.which = which;
+      pin.dataset.orient = orient;
+
+      const balloon = document.createElement('div');
+      balloon.className = 'balloon';
+      balloon.textContent = '…';
+
+      if (orient === 'bottom') {
+        // Order: diamond (top, on axis), stem, balloon (below)
+        const diamond = document.createElement('div');
+        diamond.className = 'bp-diamond';
+        const stem = document.createElement('div');
+        stem.className = 'bp-stem bp-stem-v';
+        pin.appendChild(diamond);
+        pin.appendChild(stem);
+        pin.appendChild(balloon);
+      } else {
+        // left axis: balloon (left), stem, diamond (right, on axis)
+        const stem = document.createElement('div');
+        stem.className = 'bp-stem bp-stem-h';
+        const diamond = document.createElement('div');
+        diamond.className = 'bp-diamond';
+        pin.appendChild(balloon);
+        pin.appendChild(stem);
+        pin.appendChild(diamond);
+      }
+
+      axisEl.appendChild(pin);
+      return { pin, balloon };
+    }
+
+    // ── Position update ──
+    // For bottom x-axis: badge.style.left gives the along-axis pixel position
+    // The axis line within the component is at y = margin + thickness/2 = 44
+    // Diamond sits on axis line, stem goes down, balloon further down
+    function updateXPin(pin, badge) {
+      if (!badge) return;
+      const bLeft = parseFloat(badge.style.left); // center of handle in component coords
+
+      // pin is positioned with its top-left as reference
+      // diamond center is at the top of the pin flex column
+      // We want diamond center at (bLeft, 44) in component coords
+      // diamond is 6px, so top of pin = 44 - 3 (half diamond)
+      // pin center-x = bLeft, so left of pin = bLeft - (pin.offsetWidth/2)
+      // Approximate: pin is 56px wide (balloon), center at bLeft
+      const pinLeft = bLeft - BALLOON_R;
+      const pinTop = axLine - 3; // diamond center on axis line (y=44), diamond half = 3px
+
+      pin.style.left = `${pinLeft}px`;
+      pin.style.top = `${pinTop}px`;
+    }
+
+    function updateYPin(pin, badge) {
+      if (!badge) return;
+      const bTop = parseFloat(badge.style.top); // center of handle in component coords
+
+      // left axis: diamond on axis line (x=44), stem goes left, balloon leftmost
+      // diamond sits at (44, bTop)
+      // pin row: [balloon][stem][diamond]
+      // diamond right edge at axLine+3, so pin right = axLine+3
+      // pin height = 56px (balloon), center at bTop
+      const pinRight = axLine + 3; // diamond right edge
+      // We use right positioning relative to parent... or compute left:
+      // total pin width = BALLOON_R*2 + STEM + 6 (diamond) = 56+12+6 = 74
+      const totalW = BALLOON_R * 2 + STEM + 6;
+      const pinLeft = pinRight - totalW;
+      const pinTop = bTop - BALLOON_R;
+
+      pin.style.left = `${pinLeft}px`;
+      pin.style.top = `${pinTop}px`;
+    }
+
+    // ── Drag behavior ──
+    function attachDrag(balloon, axisEl, which, orient) {
+      const inputs = axisEl.querySelectorAll('input[type=range]');
+      const theInput = which === 'lo' ? inputs[0] : inputs[1];
+      const scale_dom = () => {
+        const min = parseFloat(theInput.min), max = parseFloat(theInput.max);
+        return [min, max];
+      };
+      const step = parseFloat(theInput.step) || 1;
+
+      let startClient, startValue;
+
+      balloon.addEventListener('pointerdown', (e) => {
+        // Don't interfere with dblclick → editing
+        if (e.detail === 2) return;
+        e.preventDefault();
+        e.stopPropagation();
+        balloon.setPointerCapture(e.pointerId);
+        startClient = orient === 'bottom' ? e.clientX : e.clientY;
+        startValue = parseFloat(theInput.value);
+        balloon.style.cursor = 'grabbing';
+
+        // pixels per data unit: compute from component bounding rect
+        const axisRect = axisEl.getBoundingClientRect();
+        const axisLength = orient === 'bottom' ? axisRect.width - AXMARGIN * 2 : axisRect.height - AXMARGIN * 2;
+        const [dMin, dMax] = scale_dom();
+        // For bottom axis: right = higher value; for left: down = lower value (scale inverted)
+        const dataRange = dMax - dMin;
+        const pxPerUnit = axisLength / dataRange;
+        const sign = orient === 'left' ? -1 : 1; // vertical: dragging down → smaller value
+
+        const onMove = (e2) => {
+          const delta = orient === 'bottom'
+            ? (e2.clientX - startClient)
+            : (e2.clientY - startClient);
+          const dData = delta / pxPerUnit * sign;
+          let newVal = startValue + dData;
+          const [lo, hi] = [parseFloat(inputs[0].value), parseFloat(inputs[1].value)];
+          const [dMin2, dMax2] = scale_dom();
+          if (which === 'lo') newVal = Math.max(dMin2, Math.min(hi, newVal));
+          else newVal = Math.min(dMax2, Math.max(lo, newVal));
+          // snap to step
+          newVal = Math.round(newVal / step) * step;
+          theInput.value = newVal;
+          theInput.dispatchEvent(new Event('input', { bubbles: true }));
+        };
+
+        const onUp = () => {
+          balloon.style.cursor = '';
+          balloon.releasePointerCapture(e.pointerId);
+          balloon.removeEventListener('pointermove', onMove);
+          balloon.removeEventListener('pointerup', onUp);
+        };
+
+        balloon.addEventListener('pointermove', onMove);
+        balloon.addEventListener('pointerup', onUp);
+      });
+    }
+
+    // ── Double-click to edit ──
+    function attachDblClick(balloon, axisEl, which) {
+      const inputs = axisEl.querySelectorAll('input[type=range]');
+      const theInput = which === 'lo' ? inputs[0] : inputs[1];
+
+      balloon.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        const current = parseFloat(theInput.value);
+        const [dMin, dMax] = [parseFloat(theInput.min), parseFloat(theInput.max)];
+        const step = parseFloat(theInput.step) || 1;
+
+        balloon.innerHTML = '';
+        const inp = document.createElement('input');
+        inp.type = 'number';
+        inp.value = Math.round(current);
+        inp.style.width = '44px';
+        inp.style.border = 'none';
+        inp.style.background = 'transparent';
+        inp.style.color = 'white';
+        inp.style.font = '600 11px sans-serif';
+        inp.style.textAlign = 'center';
+        inp.style.outline = 'none';
+        inp.style.padding = '0';
+        balloon.appendChild(inp);
+        inp.focus();
+        inp.select();
+
+        const commit = () => {
+          let v = parseFloat(inp.value);
+          if (Number.isNaN(v)) v = current;
+          v = Math.max(dMin, Math.min(dMax, Math.round(v / step) * step));
+          theInput.value = v;
+          theInput.dispatchEvent(new Event('input', { bubbles: true }));
+          // layout() will update balloon text via updateAll
+        };
+
+        inp.addEventListener('blur', commit);
+        inp.addEventListener('keydown', (ke) => {
+          if (ke.key === 'Enter') { ke.preventDefault(); inp.blur(); }
+          if (ke.key === 'Escape') { inp.removeEventListener('blur', commit); inp.blur(); }
+        });
+      });
+    }
+
+    // ── Wire up X-axis balloon pins ──
+    const xBadges = xAxis.querySelectorAll('.za-value');
+    const xLoBadge = xBadges[0], xHiBadge = xBadges[1];
+    const { pin: xLoPin, balloon: xLoBalloon } = makeBalloonPin(xAxis, 'lo', 'bottom');
+    const { pin: xHiPin, balloon: xHiBalloon } = makeBalloonPin(xAxis, 'hi', 'bottom');
+    attachDrag(xLoBalloon, xAxis, 'lo', 'bottom');
+    attachDrag(xHiBalloon, xAxis, 'hi', 'bottom');
+    attachDblClick(xLoBalloon, xAxis, 'lo');
+    attachDblClick(xHiBalloon, xAxis, 'hi');
+
+    // ── Wire up Y-axis balloon pins ──
+    const yBadges = yAxis.querySelectorAll('.za-value');
+    const yLoBadge = yBadges[0], yHiBadge = yBadges[1];
+    const { pin: yLoPin, balloon: yLoBalloon } = makeBalloonPin(yAxis, 'lo', 'left');
+    const { pin: yHiPin, balloon: yHiBalloon } = makeBalloonPin(yAxis, 'hi', 'left');
+    attachDrag(yLoBalloon, yAxis, 'lo', 'left');
+    attachDrag(yHiBalloon, yAxis, 'hi', 'left');
+    attachDblClick(yLoBalloon, yAxis, 'lo');
+    attachDblClick(yHiBalloon, yAxis, 'hi');
+
+    // ── Text formatter ──
+    function fmt(v, units) {
+      return `${Math.round(v)} ${units}`;
+    }
+
+    // ── Update all balloon positions and text ──
+    function updateAll() {
+      // X-axis
+      const xInputs = xAxis.querySelectorAll('input[type=range]');
+      const xUnits = 'mm';
+      xLoBalloon.textContent !== '' && !xLoBalloon.querySelector('input') &&
+        (xLoBalloon.textContent = fmt(parseFloat(xInputs[0].value), xUnits));
+      xHiBalloon.textContent !== '' && !xHiBalloon.querySelector('input') &&
+        (xHiBalloon.textContent = fmt(parseFloat(xInputs[1].value), xUnits));
+
+      // re-read badge positions for layout (badges still exist, just hidden)
+      // After layout(), badges have style.left set
+      updateXPin(xLoPin, xLoBadge);
+      updateXPin(xHiPin, xHiBadge);
+
+      // Y-axis
+      const yInputs = yAxis.querySelectorAll('input[type=range]');
+      const yUnits = 'g';
+      yLoBalloon.textContent !== '' && !yLoBalloon.querySelector('input') &&
+        (yLoBalloon.textContent = fmt(parseFloat(yInputs[0].value), yUnits));
+      yHiBalloon.textContent !== '' && !yHiBalloon.querySelector('input') &&
+        (yHiBalloon.textContent = fmt(parseFloat(yInputs[1].value), yUnits));
+
+      updateYPin(yLoPin, yLoBadge);
+      updateYPin(yHiPin, yHiBadge);
+    }
+
+    // Listen for input events from both axes
+    xAxis.addEventListener('input', () => {
+      // Balloon text update
+      const xInputs = xAxis.querySelectorAll('input[type=range]');
+      if (!xLoBalloon.querySelector('input')) xLoBalloon.textContent = fmt(parseFloat(xInputs[0].value), 'mm');
+      if (!xHiBalloon.querySelector('input')) xHiBalloon.textContent = fmt(parseFloat(xInputs[1].value), 'mm');
+      // Use requestAnimationFrame to read badge positions after layout
+      requestAnimationFrame(() => {
+        updateXPin(xLoPin, xLoBadge);
+        updateXPin(xHiPin, xHiBadge);
+      });
+    });
+
+    yAxis.addEventListener('input', () => {
+      const yInputs = yAxis.querySelectorAll('input[type=range]');
+      if (!yLoBalloon.querySelector('input')) yLoBalloon.textContent = fmt(parseFloat(yInputs[0].value), 'g');
+      if (!yHiBalloon.querySelector('input')) yHiBalloon.textContent = fmt(parseFloat(yInputs[1].value), 'g');
+      requestAnimationFrame(() => {
+        updateYPin(yLoPin, yLoBadge);
+        updateYPin(yHiPin, yHiBadge);
+      });
+    });
+
+    // Initial render after layout
+    requestAnimationFrame(() => {
+      // Initial text
+      const xInputs = xAxis.querySelectorAll('input[type=range]');
+      const yInputs = yAxis.querySelectorAll('input[type=range]');
+      xLoBalloon.textContent = fmt(parseFloat(xInputs[0].value), 'mm');
+      xHiBalloon.textContent = fmt(parseFloat(xInputs[1].value), 'mm');
+      yLoBalloon.textContent = fmt(parseFloat(yInputs[0].value), 'g');
+      yHiBalloon.textContent = fmt(parseFloat(yInputs[1].value), 'g');
+      updateAll();
+    });
+
+    window.__demo = { xAxis, yAxis, x, y };
+  </script>
+</body>
+</html>

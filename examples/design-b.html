@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>d3-zoomable-axis — Design B: Flag Callout</title>
+  <script type="importmap">
+  {
+    "imports": {
+      "d3-selection": "https://esm.sh/d3-selection@3",
+      "d3-scale": "https://esm.sh/d3-scale@4",
+      "d3-axis": "https://esm.sh/d3-axis@3",
+      "d3-brush": "https://esm.sh/d3-brush@3",
+      "d3-dispatch": "https://esm.sh/d3-dispatch@3",
+      "fast-kde": "https://esm.sh/fast-kde@0.2.2",
+      "reactive-widget-helper": "https://esm.sh/reactive-widget-helper@0.0.3"
+    }
+  }
+  </script>
+  <style>
+    body { font: 14px/1.5 system-ui, sans-serif; margin: 2rem; max-width: 900px; }
+    .hint { color: #555; }
+    #plotWrap { position: relative; margin-top: 1rem; }
+    .axis text { font: 10px sans-serif; }
+
+    /* ── Design B: Flag Callout styles ── */
+    .callout-handle {
+      position: absolute;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      user-select: none;
+      pointer-events: auto;
+      cursor: grab;
+      z-index: 20;
+    }
+    .callout-handle:active { cursor: grabbing; }
+
+    .callout-arrow {
+      width: 0; height: 0;
+      border-left: 6px solid transparent;
+      border-right: 6px solid transparent;
+      border-bottom: 8px solid #4682b4;
+      flex-shrink: 0;
+    }
+    .callout-arrow.lo { border-bottom-color: #4682b4; }
+    .callout-arrow.hi { border-bottom-color: #2a5a8a; }
+
+    .callout-pill {
+      background: #4682b4;
+      color: white;
+      padding: 4px 10px;
+      border-radius: 12px;
+      font: 600 11px sans-serif;
+      white-space: nowrap;
+      box-shadow: 0 2px 6px rgba(0,0,0,.2);
+      min-width: 54px;
+      text-align: center;
+    }
+    .callout-handle.lo .callout-pill {
+      background: #4682b4;
+      opacity: 0.85;
+    }
+    .callout-handle.hi .callout-pill {
+      background: #2a5a8a;
+    }
+
+    /* pill text input (double-click to edit) */
+    .callout-pill input {
+      background: transparent;
+      border: none;
+      border-bottom: 1px solid rgba(255,255,255,0.7);
+      color: white;
+      font: 600 11px sans-serif;
+      width: 54px;
+      text-align: center;
+      outline: none;
+      padding: 0;
+    }
+    .callout-pill input::-webkit-inner-spin-button,
+    .callout-pill input::-webkit-outer-spin-button { -webkit-appearance: none; }
+
+    /* ── Vertical (left) axis callout: arrow points RIGHT ── */
+    .callout-handle-v {
+      position: absolute;
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      user-select: none;
+      pointer-events: auto;
+      cursor: grab;
+      z-index: 20;
+    }
+    .callout-handle-v:active { cursor: grabbing; }
+
+    .callout-arrow-v {
+      width: 0; height: 0;
+      border-top: 6px solid transparent;
+      border-bottom: 6px solid transparent;
+      border-right: 8px solid #4682b4;
+      flex-shrink: 0;
+    }
+    .callout-handle-v.lo .callout-arrow-v { border-right-color: #4682b4; }
+    .callout-handle-v.hi .callout-arrow-v { border-right-color: #2a5a8a; }
+
+    .callout-handle-v .callout-pill {
+      background: #4682b4;
+    }
+    .callout-handle-v.lo .callout-pill {
+      background: #4682b4;
+      opacity: 0.85;
+    }
+    .callout-handle-v.hi .callout-pill {
+      background: #2a5a8a;
+      opacity: 1;
+    }
+
+    .callout-handle-v .callout-pill input {
+      background: transparent;
+      border: none;
+      border-bottom: 1px solid rgba(255,255,255,0.7);
+      color: white;
+      font: 600 11px sans-serif;
+      width: 54px;
+      text-align: center;
+      outline: none;
+      padding: 0;
+    }
+    .callout-handle-v .callout-pill input::-webkit-inner-spin-button,
+    .callout-handle-v .callout-pill input::-webkit-outer-spin-button { -webkit-appearance: none; }
+  </style>
+</head>
+<body>
+  <h1>Design B — Flag Callout Handles</h1>
+  <p class="hint">Each handle is a rounded-rectangle pill badge with a triangular arrow pointing at the
+  exact axis position. Drag a pill to move the handle. Double-click a pill to type a value directly.
+  Drag the shaded band to pan.</p>
+
+  <div id="plotWrap"></div>
+  <p class="out hint" id="out">—</p>
+
+  <script type="module">
+    import { select } from "d3-selection";
+    import { scaleLinear } from "d3-scale";
+    import { zoomableAxisInput } from "../src/input.js";
+
+    const X = "Flipper Length (mm)", Y = "Body Mass (g)";
+    const COLORS = { "Adelie": "#ff8c00", "Chinstrap": "#9932cc", "Gentoo": "#008080" };
+    const species = (d) => (d.Species || "").split(" ")[0];
+
+    const raw = await fetch("https://cdn.jsdelivr.net/npm/vega-datasets@2/data/penguins.json").then(r => r.json());
+    const data = raw.filter(d => d[X] != null && d[Y] != null);
+
+    const plotW = 460, plotH = 360, vAxis = 64, hAxis = 56;
+    const AXMARGIN = 22, AXTHICK = 44, axLine = AXMARGIN + AXTHICK / 2; // = 44
+    const xExtent = [Math.min(...data.map(d => d[X])), Math.max(...data.map(d => d[X]))];
+    const yExtent = [Math.min(...data.map(d => d[Y])), Math.max(...data.map(d => d[Y]))];
+
+    const x = scaleLinear().domain(xExtent).range([0, plotW]);
+    const y = scaleLinear().domain(yExtent).range([plotH, 0]);
+
+    const wrap = select("#plotWrap")
+      .style("width", `${vAxis + plotW + 30}px`)
+      .style("height", `${plotH + hAxis + 30}px`);
+
+    // scatterplot SVG
+    const svg = wrap.append("svg")
+      .style("position", "absolute").style("left", `${vAxis}px`).style("top", "0")
+      .style("z-index", "2").style("pointer-events", "none")
+      .attr("width", plotW + 20).attr("height", plotH + 20);
+    svg.append("clipPath").attr("id", "plotClip").append("rect").attr("width", plotW).attr("height", plotH);
+    const gPts = svg.append("g").attr("clip-path", "url(#plotClip)");
+    svg.append("rect").attr("width", plotW).attr("height", plotH).attr("fill", "none").attr("stroke", "#ddd");
+
+    function draw() {
+      gPts.selectAll("circle").data(data).join("circle")
+        .attr("r", 3.5).attr("fill-opacity", 0.75)
+        .attr("fill", d => COLORS[species(d)] || "#888")
+        .attr("cx", d => x(d[X])).attr("cy", d => y(d[Y]));
+    }
+    draw();
+
+    // ── x zoomable axis (bottom) ──
+    const xAxis = zoomableAxisInput(scaleLinear().domain(xExtent), {
+      orient: "bottom", step: 1, length: plotW, value: xExtent, label: "Flipper length", units: "mm",
+      scent: { values: data.map(d => d[X]), type: "histogram", bins: 28 },
+    });
+    xAxis.style.position = "absolute";
+    xAxis.style.left = `${vAxis - AXMARGIN}px`;
+    xAxis.style.top = `${plotH - axLine}px`;
+    xAxis.addEventListener("input", () => { x.domain(xAxis.value); draw(); report(); });
+    wrap.node().appendChild(xAxis);
+
+    // ── y zoomable axis (left) ──
+    const yAxis = zoomableAxisInput(scaleLinear().domain(yExtent), {
+      orient: "left", step: 25, length: plotH, value: [3500, 6000], label: "Body mass", units: "g",
+      scent: { values: data.map(d => d[Y]), type: "violin", bins: 28 },
+    });
+    y.domain([3500, 6000]);
+    yAxis.style.position = "absolute";
+    yAxis.style.left = `${vAxis - axLine}px`;
+    yAxis.style.top = `${-AXMARGIN}px`;
+    yAxis.addEventListener("input", () => { y.domain(yAxis.value); draw(); report(); });
+    wrap.node().appendChild(yAxis);
+
+    const out = document.getElementById("out");
+    const report = () => out.textContent =
+      `x (flipper) = [${xAxis.value.map(v => v.toFixed(0))}] mm   ·   y (mass) = [${yAxis.value.map(v => v.toFixed(0))}] g`;
+    report();
+
+    // ────────────────────────────────────────────────────────────────
+    // Design B: Flag Callout overlay
+    // ────────────────────────────────────────────────────────────────
+
+    // Hide the built-in SVG D-shape handles (keep them for drag interaction, just invisible)
+    xAxis.querySelectorAll('.za-handles-svg').forEach(s => s.style.opacity = '0');
+    yAxis.querySelectorAll('.za-handles-svg').forEach(s => s.style.opacity = '0');
+    // Hide the built-in value badges
+    xAxis.querySelectorAll('.za-value').forEach(v => v.style.display = 'none');
+    yAxis.querySelectorAll('.za-value').forEach(v => v.style.display = 'none');
+
+    // The axis line sits at:
+    //   x-axis (bottom): within xAxis element, y = AXMARGIN + AXTHICK/2 = axLine = 44
+    //   y-axis (left):   within yAxis element, x = AXMARGIN + AXTHICK/2 = axLine = 44
+    const AX_LINE = axLine; // = 44px from top of xAxis el / from left of yAxis el
+
+    // ── Helper: read the position of each handle via the hidden .za-value badges ──
+    // The badge left/top = computed handle center position in the component.
+    // We use this as ground truth (the component already did the clamped math for us).
+    function getHandlePositions(axisEl) {
+      const badges = axisEl.querySelectorAll('.za-value');
+      return Array.from(badges).map(b => {
+        const s = b.style;
+        // The badge has transform: translate(-50%,0) for bottom, translate(-100%,-50%) for left.
+        // We need the raw numeric left/top before transform.
+        return {
+          left: parseFloat(s.left) || 0,
+          top:  parseFloat(s.top)  || 0,
+        };
+      });
+    }
+
+    // ── Build callout handles for the X axis (horizontal, bottom) ──
+    function makeXCallout(axisEl, rangeInputs, whichClass, handleIndex) {
+      const callout = document.createElement('div');
+      callout.className = `callout-handle ${whichClass}`;
+
+      const arrow = document.createElement('div');
+      arrow.className = `callout-arrow ${whichClass}`;
+      callout.appendChild(arrow);
+
+      const pill = document.createElement('div');
+      pill.className = 'callout-pill';
+      callout.appendChild(pill);
+
+      // Place callout inside the axis element so coordinates are relative to it
+      axisEl.appendChild(callout);
+
+      // Position: horizontally centered on handle, arrow tip at the axis line
+      // callout top = AX_LINE (arrow tip sits on the axis line)
+      callout.style.top = `${AX_LINE}px`;
+      // left is set in updateXCallout
+
+      function updatePosition() {
+        const pos = getHandlePositions(axisEl);
+        if (pos[handleIndex]) {
+          callout.style.left = `${pos[handleIndex].left}px`;
+          callout.style.transform = 'translateX(-50%)';
+        }
+        // Update label text from rangeInput value
+        const ri = rangeInputs[handleIndex];
+        if (ri) {
+          const v = parseFloat(ri.value);
+          if (!pill.querySelector('input')) {
+            pill.textContent = `${Math.round(v)} mm`;
+          }
+        }
+      }
+      updatePosition();
+
+      // ── Drag behavior ──
+      let dragging = false, startX = 0, startVal = 0;
+
+      callout.addEventListener('pointerdown', (e) => {
+        // Don't intercept if we're in edit mode (inline input)
+        if (e.target.tagName === 'INPUT') return;
+        e.preventDefault();
+        e.stopPropagation();
+        dragging = true;
+        startX = e.clientX;
+        const ri = rangeInputs[handleIndex];
+        startVal = parseFloat(ri.value);
+        callout.setPointerCapture(e.pointerId);
+      });
+
+      callout.addEventListener('pointermove', (e) => {
+        if (!dragging) return;
+        const ri = rangeInputs[handleIndex];
+        const domainRange = parseFloat(ri.max) - parseFloat(ri.min);
+        const pixelsPerUnit = plotW / domainRange;
+        const dPx = e.clientX - startX;
+        let newVal = startVal + dPx / pixelsPerUnit;
+        newVal = Math.max(parseFloat(ri.min), Math.min(parseFloat(ri.max), newVal));
+        // Clamp lo ≤ hi
+        const otherRi = rangeInputs[1 - handleIndex];
+        if (handleIndex === 0) newVal = Math.min(newVal, parseFloat(otherRi.value));
+        else newVal = Math.max(newVal, parseFloat(otherRi.value));
+        ri.value = newVal;
+        ri.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+
+      callout.addEventListener('pointerup', () => { dragging = false; });
+      callout.addEventListener('pointercancel', () => { dragging = false; });
+
+      // ── Double-click to edit ──
+      callout.addEventListener('dblclick', (e) => {
+        if (pill.querySelector('input')) return;
+        const ri = rangeInputs[handleIndex];
+        const currentVal = Math.round(parseFloat(ri.value));
+        pill.innerHTML = '';
+        const inp = document.createElement('input');
+        inp.type = 'number';
+        inp.value = currentVal;
+        inp.min = ri.min; inp.max = ri.max; inp.step = ri.step;
+        pill.appendChild(inp);
+        inp.focus();
+        inp.select();
+
+        function commit() {
+          let v = parseFloat(inp.value);
+          if (isNaN(v)) v = currentVal;
+          v = Math.max(parseFloat(ri.min), Math.min(parseFloat(ri.max), v));
+          ri.value = v;
+          ri.dispatchEvent(new Event('input', { bubbles: true }));
+          pill.textContent = `${Math.round(v)} mm`;
+        }
+        inp.addEventListener('blur', commit);
+        inp.addEventListener('keydown', (ke) => {
+          if (ke.key === 'Enter') { inp.blur(); }
+          if (ke.key === 'Escape') { pill.textContent = `${currentVal} mm`; }
+        });
+      });
+
+      return updatePosition;
+    }
+
+    // ── Build callout handles for the Y axis (vertical, left) ──
+    function makeYCallout(axisEl, rangeInputs, whichClass, handleIndex) {
+      const callout = document.createElement('div');
+      callout.className = `callout-handle-v ${whichClass}`;
+
+      const arrow = document.createElement('div');
+      arrow.className = `callout-arrow-v ${whichClass}`;
+      callout.appendChild(arrow);
+
+      const pill = document.createElement('div');
+      pill.className = 'callout-pill';
+      callout.appendChild(pill);
+
+      axisEl.appendChild(callout);
+
+      // Arrow tip points right → sits at x = AX_LINE; pill extends left
+      // We use right-alignment: position relative to axis line
+      callout.style.right = `${axisEl.offsetWidth - AX_LINE}px`;
+      // top is set in updatePosition, centered on handle
+
+      function updatePosition() {
+        const pos = getHandlePositions(axisEl);
+        if (pos[handleIndex]) {
+          callout.style.top = `${pos[handleIndex].top}px`;
+          callout.style.transform = 'translateY(-50%)';
+        }
+        const ri = rangeInputs[handleIndex];
+        if (ri) {
+          const v = parseFloat(ri.value);
+          if (!pill.querySelector('input')) {
+            pill.textContent = `${Math.round(v)} g`;
+          }
+        }
+      }
+      updatePosition();
+
+      // ── Drag behavior (vertical: y movement) ──
+      let dragging = false, startY = 0, startVal = 0;
+
+      callout.addEventListener('pointerdown', (e) => {
+        if (e.target.tagName === 'INPUT') return;
+        e.preventDefault();
+        e.stopPropagation();
+        dragging = true;
+        startY = e.clientY;
+        const ri = rangeInputs[handleIndex];
+        startVal = parseFloat(ri.value);
+        callout.setPointerCapture(e.pointerId);
+      });
+
+      callout.addEventListener('pointermove', (e) => {
+        if (!dragging) return;
+        const ri = rangeInputs[handleIndex];
+        const domainRange = parseFloat(ri.max) - parseFloat(ri.min);
+        // Vertical axis: scale range is [plotH, 0] — dragging DOWN decreases value
+        const pixelsPerUnit = plotH / domainRange;
+        const dPx = e.clientY - startY;
+        // Dragging down = negative data direction (y increases upward in data space)
+        let newVal = startVal - dPx / pixelsPerUnit;
+        newVal = Math.max(parseFloat(ri.min), Math.min(parseFloat(ri.max), newVal));
+        // Clamp: lo ≤ hi
+        const otherRi = rangeInputs[1 - handleIndex];
+        if (handleIndex === 0) newVal = Math.min(newVal, parseFloat(otherRi.value));
+        else newVal = Math.max(newVal, parseFloat(otherRi.value));
+        ri.value = newVal;
+        ri.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+
+      callout.addEventListener('pointerup', () => { dragging = false; });
+      callout.addEventListener('pointercancel', () => { dragging = false; });
+
+      // ── Double-click to edit ──
+      callout.addEventListener('dblclick', (e) => {
+        if (pill.querySelector('input')) return;
+        const ri = rangeInputs[handleIndex];
+        const currentVal = Math.round(parseFloat(ri.value) / 25) * 25;
+        pill.innerHTML = '';
+        const inp = document.createElement('input');
+        inp.type = 'number';
+        inp.value = currentVal;
+        inp.min = ri.min; inp.max = ri.max; inp.step = ri.step;
+        pill.appendChild(inp);
+        inp.focus();
+        inp.select();
+
+        function commit() {
+          let v = parseFloat(inp.value);
+          if (isNaN(v)) v = currentVal;
+          v = Math.max(parseFloat(ri.min), Math.min(parseFloat(ri.max), v));
+          ri.value = v;
+          ri.dispatchEvent(new Event('input', { bubbles: true }));
+          pill.textContent = `${Math.round(v)} g`;
+        }
+        inp.addEventListener('blur', commit);
+        inp.addEventListener('keydown', (ke) => {
+          if (ke.key === 'Enter') { inp.blur(); }
+          if (ke.key === 'Escape') { pill.textContent = `${currentVal} g`; }
+        });
+      });
+
+      return updatePosition;
+    }
+
+    // We need to wait a tick so the axis has laid out and .za-value badges have their positions
+    await new Promise(r => setTimeout(r, 100));
+
+    const xRangeInputs = Array.from(xAxis.querySelectorAll('input[type=range]'));
+    const yRangeInputs = Array.from(yAxis.querySelectorAll('input[type=range]'));
+
+    const updateXLo = makeXCallout(xAxis, xRangeInputs, 'lo', 0);
+    const updateXHi = makeXCallout(xAxis, xRangeInputs, 'hi', 1);
+    const updateYLo = makeYCallout(yAxis, yRangeInputs, 'lo', 0);
+    const updateYHi = makeYCallout(yAxis, yRangeInputs, 'hi', 1);
+
+    // Re-position callout handles whenever the axis updates
+    xAxis.addEventListener('input', () => {
+      updateXLo();
+      updateXHi();
+    });
+    yAxis.addEventListener('input', () => {
+      updateYLo();
+      updateYHi();
+    });
+
+    window.__demo = { xAxis, yAxis, x, y };
+  </script>
+</body>
+</html>
