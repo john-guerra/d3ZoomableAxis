@@ -1,4 +1,4 @@
-import { create, select } from "d3-selection";
+import { create } from "d3-selection";
 import { scaleLinear } from "d3-scale";
 import { axisBottom, axisTop, axisLeft, axisRight } from "d3-axis";
 import { dispatch } from "d3-dispatch";
@@ -568,12 +568,11 @@ export function zoomableAxisInput(scaleOrDomain, {
     loInput.value = val[0];
     hiInput.value = val[1];
     setValuetext();
-    // along-axis geometry (handles + band) from the tested pure module
+    // along-axis handle pixel positions from the tested pure module
     const g = axisGeometry({
       domain: [dMin, dMax],
       range: horizontal ? [0, length] : [length, 0],
       value: val,
-      handleR: HR, // half-circle radius from outer scope
     });
     // Pan band fills the INSIDE of the selection right up to the endpoints — the
     // knobs bulge outward, so the whole interior is free to grab-and-pan. A hair
@@ -629,15 +628,14 @@ export function zoomableAxisInput(scaleOrDomain, {
       const outDir = orient === "bottom" ? 1 : -1;
       const ty = `${axisCross + outDir * (HR + STEM)}px`;
       const xfm = outDir > 0 ? "translate(-50%, 0)" : "translate(-50%, -100%)";
-      const containerW = length + margin * 2;
       const loW = labelLo.offsetWidth || 50;
       const hiW = labelHi.offsetWidth || 50;
       // Popover-style collision handling: keep each badge centered on its handle
       // when they're far apart, but once they'd overlap, push lo left and hi
       // right (splitting around their midpoint) so they never stack. GAP keeps a
       // small breathing space. Badges may overflow the widget box — that's fine
-      // (the host leaves room around it), so we deliberately DON'T clamp to
-      // containerW; clipping the date to fit is worse than a little overflow.
+      // (the host leaves room around it), so we deliberately DON'T clamp to the
+      // component width; clipping the date to fit is worse than a little overflow.
       const GAP = 6;
       let loC = margin + g.loPx, hiC = margin + g.hiPx;
       const minApart = (loW + hiW) / 2 + GAP;
