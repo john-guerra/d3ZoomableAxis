@@ -25,6 +25,25 @@ Two API layers:
 npm install @john-guerra/d3-zoomable-axis
 ```
 
+When bundling, the `d3-*` submodules and [`fast-kde`](https://www.npmjs.com/package/fast-kde)
+(used for the optional density overlay) come along as regular dependencies — nothing extra to do.
+
+### From a CDN (script tag)
+
+The UMD bundle is **peer-global**: to keep it small it does *not* embed d3 or `fast-kde`, so you
+must load both first. `d3` provides the `d3-*` submodules (shared global `d3`), and `fast-kde`
+must be present as the global `fastKde`:
+
+```html
+<script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+<script src="https://cdn.jsdelivr.net/npm/fast-kde@0.2"></script> <!-- exposes window.fastKde -->
+<script src="https://cdn.jsdelivr.net/npm/@john-guerra/d3-zoomable-axis"></script>
+<script>
+  // factories are merged into the shared global `d3`
+  const slider = d3.zoomableAxisBottom(d3.scaleLinear().domain([24, 92]).range([0, 600]));
+</script>
+```
+
 ## Core component (d3 idiom)
 
 ```js
