@@ -47,12 +47,15 @@ function injectStyles() {
   -webkit-appearance: none; appearance: none;
 }
 .zoomable-axis-input input[type=range]:focus { outline: none; }
+/* Thumbs are pointer-INERT: endpoint dragging is done via the SVG .za-knob
+   (setupDrag), not the native thumb. The inputs stay for keyboard + a11y only,
+   so there is no ambiguous full-width drag zone competing with the pan band. */
 .zoomable-axis-input input[type=range]::-webkit-slider-thumb {
-  -webkit-appearance: none; pointer-events: auto; cursor: grab;
+  -webkit-appearance: none; pointer-events: none;
   height: 20px; width: 20px; opacity: 0;
 }
 .zoomable-axis-input input[type=range]::-moz-range-thumb {
-  pointer-events: auto; cursor: grab; height: 20px; width: 20px; opacity: 0;
+  pointer-events: none; height: 20px; width: 20px; opacity: 0;
 }
 /* ── Musical-note / p-shape handles ─────────────────────────────────────────
    SVG layer: tick (value marker) + stem (connecting line). pointer-events:none
@@ -64,9 +67,17 @@ function injectStyles() {
 .zoomable-axis-input .za-handle.za-dragging { cursor: grabbing; }
 .zoomable-axis-input .za-handle .za-handle-tick { stroke: var(--za-accent); stroke-width: 2; stroke-linecap: round; }
 .zoomable-axis-input .za-handle .za-handle-stem { stroke: var(--za-accent); stroke-width: 1.5; }
+/* Knob: the round grab affordance at each endpoint — the only place an endpoint
+   drag starts. Sized generously for a comfortable pointer target. */
+.zoomable-axis-input .za-handle .za-knob { fill: var(--za-accent); stroke: #fff; stroke-width: 1.5; }
+.zoomable-axis-input .za-handle:hover .za-knob { fill: color-mix(in srgb, var(--za-accent) 80%, #fff); }
 .zoomable-axis-input .za-handle.focused .za-handle-tick,
 .zoomable-axis-input .za-handle.focused .za-handle-stem { stroke-width: 3; filter: drop-shadow(0 0 3px var(--za-accent)); }
-.zoomable-axis-input .za-selected { position: absolute; background: var(--za-accent); opacity: .25; cursor: move; }
+.zoomable-axis-input .za-handle.focused .za-knob,
+.zoomable-axis-input .za-handle.za-dragging .za-knob { stroke-width: 2.5; filter: drop-shadow(0 0 3px var(--za-accent)); }
+/* Pan band: z-index 2 keeps it above the (pointer-inert) inputs so the region
+   BETWEEN the knobs reliably grabs to pan the whole window. */
+.zoomable-axis-input .za-selected { position: absolute; z-index: 2; background: var(--za-accent); opacity: .25; cursor: move; }
 .zoomable-axis-input .za-selected:active { cursor: grabbing; }
 .zoomable-axis-input .za-selected.za-thin { background: var(--za-accent); opacity: .08; }
 .zoomable-axis-input .za-band-line { position: absolute; background: var(--za-accent); opacity: .9; pointer-events: none; border-radius: 1px; }
@@ -183,17 +194,33 @@ export function zoomableAxisInput(scaleOrDomain, {
     .attr("width", el.style.width).attr("height", el.style.height);
   const handlesG = handlesSvg.append("g").attr("class", "za-handles")
     .attr("transform", axisG.attr("transform"));
+  const KNOB_R = 8; // grab-knob radius (px) — the endpoint drag target
   const mkHandleEl = () => {
-    // pointer-events:all on the group so the tick+stem area is directly draggable.
+    // pointer-events:all on the group so the knob+tick+stem area is draggable.
     const g = handlesG.append("g").attr("class", "za-handle").attr("pointer-events", "all");
-    g.append("line").attr("class", "za-handle-tick");
     g.append("line").attr("class", "za-handle-stem");
+    g.append("line").attr("class", "za-handle-tick");
+    // A HALF-disc (flat side on the axis line at the value, bulging OUTWARD, away
+    // from the selected range) — you resize by grabbing outside the range; the
+    // inside belongs to the pan band. Path `d` is set per-orientation in layout.
+    g.append("path").attr("class", "za-knob");
     return g;
   };
+  // Semicircle path: flat diameter through the endpoint on the axis line, curved
+  // side bulging in the `outward` pixel direction (−1/+1). `outward>0` → sweep 1.
+  const knobPath = (px, outward) => {
+    const s = outward > 0 ? 1 : 0;
+    return horizontal
+      ? `M ${px} ${-KNOB_R} A ${KNOB_R} ${KNOB_R} 0 0 ${s} ${px} ${KNOB_R} Z`
+      : `M ${-KNOB_R} ${px} A ${KNOB_R} ${KNOB_R} 0 0 ${s} ${KNOB_R} ${px} Z`;
+  };
+  // Along-axis pixel direction of INCREASING value (+1 for range [0,len], −1 for
+  // [len,0]). lo bulges toward smaller values, hi toward larger — i.e. outward.
+  const axisSign = Math.sign(scale.range()[1] - scale.range()[0]) || 1;
   const loHandleEl = mkHandleEl();
   const hiHandleEl = mkHandleEl();
 
-  function updateHandleEl(handleEl, px) {
+  function updateHandleEl(handleEl, px, which) {
     // Musical-note / p-shape: a tick line (value marker) + a stem reaching toward
     // the badge outside the chart area. Both lo and hi stems point outward (away
     // from the chart) in the same direction for a given orient.
@@ -214,6 +241,10 @@ export function zoomableAxisInput(scaleOrDomain, {
     }
     handleEl.select(".za-handle-tick").attr("x1", tx1).attr("y1", ty1).attr("x2", tx2).attr("y2", ty2);
     handleEl.select(".za-handle-stem").attr("x1", sx1).attr("y1", sy1).attr("x2", sx2).attr("y2", sy2);
+    // Half-disc bulging outward (away from the range): lo toward smaller values,
+    // hi toward larger. So the grab area lives strictly OUTSIDE the selection.
+    const outward = which === "hi" ? axisSign : -axisSign;
+    handleEl.select(".za-knob").attr("d", knobPath(px, outward));
   }
 
   // selected-range band (drag to pan). With a scent, the band is a faint hit zone
@@ -262,25 +293,9 @@ export function zoomableAxisInput(scaleOrDomain, {
   hiInput.addEventListener("focus", () => { hiHandleEl.classed("focused", true);  labelHi.classList.add("za-focused"); });
   hiInput.addEventListener("blur",  () => { hiHandleEl.classed("focused", false); labelHi.classList.remove("za-focused"); });
 
-  // Dual-range z-index toggling: always give the thumb NEAREST the cursor the top
-  // z-index so it is the one that receives pointer events. Without this, the input
-  // appended last is always on top and the lo handle becomes unreachable at the left.
-  el.addEventListener("pointermove", (e) => {
-    const rect = el.getBoundingClientRect();
-    // Cursor position in along-axis pixel space (same coord system as scale output).
-    const pxInAxis = horizontal
-      ? e.clientX - rect.left - margin
-      : e.clientY - rect.top  - margin;
-    const loPx = scale(val[0]);
-    const hiPx = scale(val[1]);
-    const dLo = Math.abs(pxInAxis - loPx);
-    const dHi = Math.abs(pxInAxis - hiPx);
-    // When equidistant (handles overlap), prefer lo if cursor is in the lower
-    // half of the range so both thumbs remain reachable even when they coincide.
-    const loOnTop = dLo < dHi || (dLo === dHi && pxInAxis <= (loPx + hiPx) / 2);
-    loInput.style.zIndex = loOnTop ? 2 : 1;
-    hiInput.style.zIndex = loOnTop ? 1 : 2;
-  });
+  // (Removed the dual-range z-index proximity toggle: the native thumbs are now
+  // pointer-inert, so there is no thumb-vs-thumb hit-test to arbitrate. Endpoint
+  // dragging happens on the SVG knobs; the inputs are keyboard/a11y only.)
 
   // Badge pill: note head at the tip of the stem. Draggable + double-click to edit.
   const mkLabel = () => { const d = document.createElement("div"); d.className = "za-value"; container.node().appendChild(d); return d; };
@@ -293,13 +308,22 @@ export function zoomableAxisInput(scaleOrDomain, {
   // double-click-to-edit. We only preventDefault (and mark dragging) once the
   // pointer actually moves past the threshold.
   const DRAG_THRESH = 3; // px
-  function setupDrag(target, which) {
+  function setupDrag(target, which, focusInput = false) {
     const inputEl = which === "lo" ? loInput : hiInput;
     const sr = scale.range();
     const dataPerPx = (dMax - dMin) / (sr[sr.length - 1] - sr[0]);
     const node = target.node ? target.node() : target; // d3 selection or raw element
     node.addEventListener("pointerdown", (ev) => {
       if (ev.button !== 0) return;
+      // Grabbing a knob focuses its input so arrow-key nudging works afterward
+      // (the native thumb no longer receives the click to do this for us).
+      // preventDefault here suppresses the compat mousedown that would otherwise
+      // steal focus back to the body — safe because knobs (unlike badges) have no
+      // double-click-to-edit that a stationary press must preserve.
+      if (focusInput) {
+        ev.preventDefault();
+        inputEl.focus({ preventScroll: true });
+      }
       const startPx = horizontal ? ev.clientX : ev.clientY;
       const startVal = val[which === "lo" ? 0 : 1];
       let started = false;
@@ -371,8 +395,8 @@ export function zoomableAxisInput(scaleOrDomain, {
   }
 
   // SVG handle (tick + stem) and badge pill are both independently draggable.
-  setupDrag(loHandleEl, "lo");
-  setupDrag(hiHandleEl, "hi");
+  setupDrag(loHandleEl, "lo", true);
+  setupDrag(hiHandleEl, "hi", true);
   setupDrag(labelLo, "lo");
   setupDrag(labelHi, "hi");
   setupBadgeEdit(labelLo, "lo");
@@ -394,24 +418,29 @@ export function zoomableAxisInput(scaleOrDomain, {
       value: val,
       handleR: HR, // half-circle radius from outer scope
     });
-    // Band spans from lo sticker to hi sticker (no D-shape radius inset).
-    const minHit = 16;
+    // Pan band fills the INSIDE of the selection right up to the endpoints — the
+    // knobs bulge outward, so the whole interior is free to grab-and-pan. A hair
+    // of inset keeps it off the value ticks. If the window is too narrow to leave
+    // a usable strip, hide the band — the user resizes with the outward knobs.
+    const INNER_PAD = 2;
+    const MIN_PAN = 10; // px; below this there's no room to pan between endpoints
     const bLo = Math.min(g.loPx, g.hiPx), bHi = Math.max(g.loPx, g.hiPx);
-    let bStart = bLo, bLen = bHi - bLo;
-    if (bLen < minHit) {
-      bStart = (bLo + bHi) / 2 - minHit / 2;
-      bLen = minHit;
-    }
-    if (horizontal) {
-      band.style.left = `${margin + bStart}px`;
-      band.style.top = `${margin + thickness / 2 - 6}px`;
-      band.style.width = `${bLen}px`;
-      band.style.height = `12px`;
+    const bStart = bLo + INNER_PAD, bLen = bHi - bLo - 2 * INNER_PAD;
+    if (bLen < MIN_PAN) {
+      band.style.display = "none";
     } else {
-      band.style.left = `${margin + thickness / 2 - 6}px`;
-      band.style.top = `${margin + bStart}px`;
-      band.style.width = `12px`;
-      band.style.height = `${bLen}px`;
+      band.style.display = "block";
+      if (horizontal) {
+        band.style.left = `${margin + bStart}px`;
+        band.style.top = `${margin}px`;
+        band.style.width = `${bLen}px`;
+        band.style.height = `${thickness}px`;
+      } else {
+        band.style.left = `${margin}px`;
+        band.style.top = `${margin + bStart}px`;
+        band.style.width = `${thickness}px`;
+        band.style.height = `${bLen}px`;
+      }
     }
     // thin selection line on the domain line (only when a scent is shown)
     if (bandLine) {
@@ -429,9 +458,9 @@ export function zoomableAxisInput(scaleOrDomain, {
         bandLine.style.height = `${hi - lo}px`;
       }
     }
-    // Update SVG musical-note handles (tick + stem).
-    updateHandleEl(loHandleEl, g.loPx);
-    updateHandleEl(hiHandleEl, g.hiPx);
+    // Update SVG musical-note handles (tick + stem + outward half-knob).
+    updateHandleEl(loHandleEl, g.loPx, "lo");
+    updateHandleEl(hiHandleEl, g.hiPx, "hi");
     // Badge pills: positioned at stem tip (HR + STEM pixels out from axis line).
     const fmt = (v) => `${format(v)}${units ? " " + units : ""}`;
     labelLo.textContent = fmt(val[0]);
