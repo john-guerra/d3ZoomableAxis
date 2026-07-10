@@ -1,6 +1,6 @@
 {
   "name": "@john-guerra/d3-zoomable-axis",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "A d3 axis you can drag to zoom: combines a d3 axis with a dual-handle range control. Pure-d3 idiom + optional reactive-widget input.",
   "keywords": [
     "d3",
