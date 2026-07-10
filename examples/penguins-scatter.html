@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>d3-zoomable-axis — penguins scatterplot (bottom + left)</title>
+  <script type="importmap">
+  {
+    "imports": {
+      "d3-selection": "../node_modules/d3-selection/src/index.js",
+      "d3-scale": "../node_modules/d3-scale/src/index.js",
+      "d3-axis": "../node_modules/d3-axis/src/index.js",
+      "d3-brush": "../node_modules/d3-brush/src/index.js",
+      "d3-shape": "../node_modules/d3-shape/src/index.js",
+      "d3-path": "../node_modules/d3-path/src/index.js",
+      "d3-dispatch": "../node_modules/d3-dispatch/src/index.js",
+      "d3-color": "../node_modules/d3-color/src/index.js",
+      "d3-format": "../node_modules/d3-format/src/index.js",
+      "d3-interpolate": "../node_modules/d3-interpolate/src/index.js",
+      "d3-time": "../node_modules/d3-time/src/index.js",
+      "d3-time-format": "../node_modules/d3-time-format/src/index.js",
+      "d3-array": "../node_modules/d3-array/src/index.js",
+      "internmap": "../node_modules/internmap/src/index.js",
+      "d3-drag": "../node_modules/d3-drag/src/index.js",
+      "d3-timer": "../node_modules/d3-timer/src/index.js",
+      "d3-transition": "../node_modules/d3-transition/src/index.js",
+      "d3-ease": "../node_modules/d3-ease/src/index.js",
+      "fast-kde": "../node_modules/fast-kde/src/index.js",
+      "reactive-widget-helper": "./reactive-widget-stub.js"
+    }
+  }
+  </script>
+  <style>
+    body { font: 14px/1.5 system-ui, sans-serif; margin: 2rem; max-width: 900px; background: #fafafa; color: #222; }
+    h1 { font-size: 1.4rem; }
+    .hint { color: #555; max-width: 640px; }
+    #plotWrap { position: relative; margin-top: 1.5rem; }
+    .out { color: #555; margin-top: 1rem; font-variant-numeric: tabular-nums; }
+    .legend { display: flex; gap: 1.2rem; margin-top: .5rem; font-size: .85rem; }
+    .legend span { display: inline-flex; align-items: center; gap: .35rem; }
+    .legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  </style>
+</head>
+<body>
+  <h1>Penguins scatterplot — zoom via two d3-zoomable-axis (bottom + left)</h1>
+  <p class="hint">
+    Drag a half-knob to resize an end, drag the interior band to pan, or drag/double-click a
+    value badge. The scatter zooms live to the selected window. Each axis carries a scented
+    marginal distribution that grows <b>away from the plot</b> (x-histogram downward, y-violin
+    leftward), so it reads like a classic marginal plot instead of covering the points. Click the
+    ⚙ on either axis to retune its scent.
+  </p>
+
+  <div class="legend">
+    <span><i style="background:#ff8c00"></i>Adelie</span>
+    <span><i style="background:#9932cc"></i>Chinstrap</span>
+    <span><i style="background:#008080"></i>Gentoo</span>
+  </div>
+
+  <div id="plotWrap"></div>
+  <p class="out" id="out">—</p>
+
+  <script type="module">
+    import { select } from "d3-selection";
+    import { scaleLinear } from "d3-scale";
+    import { zoomableAxisInput } from "../src/input.js";
+
+    const X = "Flipper Length (mm)", Y = "Body Mass (g)";
+    const COLORS = { Adelie: "#ff8c00", Chinstrap: "#9932cc", Gentoo: "#008080" };
+    const species = (d) => (d.Species || "").split(" ")[0];
+
+    const raw = await fetch("./penguins.json").then((r) => r.json());
+    const data = raw.filter((d) => d[X] != null && d[Y] != null);
+
+    const plotW = 460, plotH = 360, vAxis = 70, hAxis = 70;
+    // The zoomable axis draws its domain line at (margin + thickness/2) into the
+    // component; offset each axis by that so the line sits flush on the plot edge.
+    const AXMARGIN = 22, AXTHICK = 44, axLine = AXMARGIN + AXTHICK / 2;
+
+    const xExtent = [Math.min(...data.map((d) => d[X])), Math.max(...data.map((d) => d[X]))];
+    const yExtent = [Math.min(...data.map((d) => d[Y])), Math.max(...data.map((d) => d[Y]))];
+
+    // Plot scales — their DOMAIN is the current zoom window (starts at full extent).
+    const x = scaleLinear().domain(xExtent).range([0, plotW]);
+    const y = scaleLinear().domain(yExtent).range([plotH, 0]);
+
+    const wrap = select("#plotWrap")
+      .style("width", `${vAxis + plotW + 40}px`)
+      .style("height", `${plotH + hAxis + 20}px`);
+
+    // Scatter, painted ABOVE the axes' scent (z-index 2) but pointer-inert so the
+    // axis handles/pan band underneath stay fully interactive.
+    const svg = wrap.append("svg")
+      .style("position", "absolute").style("left", `${vAxis}px`).style("top", "0")
+      .style("z-index", "2").style("pointer-events", "none")
+      .attr("width", plotW + 20).attr("height", plotH + 20);
+    svg.append("clipPath").attr("id", "pclip").append("rect").attr("width", plotW).attr("height", plotH);
+    const gPts = svg.append("g").attr("clip-path", "url(#pclip)");
+    svg.append("rect").attr("width", plotW).attr("height", plotH).attr("fill", "none").attr("stroke", "#ddd");
+
+    function draw() {
+      gPts.selectAll("circle").data(data).join("circle")
+        .attr("r", 3.5).attr("fill-opacity", 0.72)
+        .attr("fill", (d) => COLORS[species(d)] || "#888")
+        .attr("cx", (d) => x(d[X])).attr("cy", (d) => y(d[Y]));
+    }
+    draw();
+
+    // x zoomable axis (bottom), flush with the plot's bottom edge.
+    const xAxis = zoomableAxisInput(scaleLinear().domain(xExtent), {
+      orient: "bottom", step: 1, length: plotW, value: xExtent,
+      label: "Flipper length", units: "mm",
+      scent: { values: data.map((d) => d[X]), type: "histogram", bins: 28, persistKey: "za-penguins-x" },
+    });
+    xAxis.style.position = "absolute";
+    xAxis.style.left = `${vAxis - AXMARGIN}px`;
+    xAxis.style.top = `${plotH - axLine}px`;
+    xAxis.addEventListener("input", () => { x.domain(xAxis.value); draw(); report(); });
+    wrap.node().appendChild(xAxis);
+
+    // y zoomable axis (left), flush with the plot's left edge.
+    const yAxis = zoomableAxisInput(scaleLinear().domain(yExtent), {
+      orient: "left", step: 25, length: plotH, value: yExtent,
+      label: "Body mass", units: "g",
+      scent: { values: data.map((d) => d[Y]), type: "violin", bins: 28, persistKey: "za-penguins-y" },
+    });
+    yAxis.style.position = "absolute";
+    yAxis.style.left = `${vAxis - axLine}px`;
+    yAxis.style.top = `${-AXMARGIN}px`;
+    yAxis.addEventListener("input", () => { y.domain(yAxis.value); draw(); report(); });
+    wrap.node().appendChild(yAxis);
+
+    const out = document.getElementById("out");
+    const report = () => (out.textContent =
+      `flipper x = [${xAxis.value.map((v) => v.toFixed(0)).join(", ")}] mm   ·   ` +
+      `mass y = [${yAxis.value.map((v) => v.toFixed(0)).join(", ")}] g   ·   ${data.length} penguins`);
+    report();
+
+    window.__demo = { xAxis, yAxis, x, y };
+  </script>
+</body>
+</html>
