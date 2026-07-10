@@ -125,7 +125,9 @@ export function zoomableAxisInput(scaleOrDomain, {
   // Scented-widget distribution drawn along the axis (Willett/Heer/Agrawala 2007):
   //   scent: { values:number[], type:"histogram"|"violin"|"area", style?:"kde"|"bars",
   //            bins?:30, size?:24, color?:"#cbd5e1", colorSelected?, side?:"out"|"in",
-  //            bandwidth?, pad?, curve? }
+  //            bandwidth?, adjust?, pad?, curve? }
+  //   KDE tunables (fast-kde): bandwidth (absolute), adjust (× the auto Scott
+  //   bandwidth), pad (domain padding). `curve` applies to area AND violin.
   //   For violins/areas, style defaults to "kde" (smooth via fast-kde); "bars" keeps
   //   the mirrored-bars look. Histograms are always bars. "area" is a one-sided
   //   sparkline fill; `curve` is a d3-shape curve factory (default: monotone).
@@ -478,7 +480,7 @@ export function zoomableAxisInput(scaleOrDomain, {
   // "scented widget": embedded info-scent so users see where the data is dense).
   function renderScent(svgSel, opts) {
     const { values, type = "histogram", bins: nBins = 30, size = 24, color = "#cbd5e1", colorSelected, side = "out",
-            style, bandwidth, pad, curve } = opts;
+            style, bandwidth, adjust, pad, curve } = opts;
     scentOut = color;
     scentIn = colorSelected || "var(--za-accent)";
     scentSize = size;
@@ -487,7 +489,7 @@ export function zoomableAxisInput(scaleOrDomain, {
     // sparkline fill (baseline on the axis, curve outward); "violin" mirrors it.
     const useKde = (type === "violin" || type === "area") && (style ?? "kde") === "kde";
     const [d0, d1] = scale.domain().map(Number);
-    if (useKde) { renderScentKde(svgSel, values, { type, nBins, size, bandwidth, pad, curve, d0, d1 }); return; }
+    if (useKde) { renderScentKde(svgSel, values, { type, nBins, size, bandwidth, adjust, pad, curve, d0, d1 }); return; }
     // Histogram draw direction. "out" = away from the plot (axisBottom → down,
     // axisTop → up, axisLeft → left, axisRight → right); "in" = toward the plot.
     const outDir = orient === "bottom" || orient === "right" ? 1 : -1;
@@ -533,18 +535,20 @@ export function zoomableAxisInput(scaleOrDomain, {
   // color and an overlay in the "in" color clipped to a rect that paintScent
   // slides to cover only the selected range. That two-tone-by-clip trick keeps
   // the silhouette continuous (no per-bin seams) while still coloring in-view.
-  function renderScentKde(svgSel, values, { type = "violin", nBins, size, bandwidth, pad, curve, d0, d1 }) {
+  function renderScentKde(svgSel, values, { type = "violin", nBins, size, bandwidth, adjust, pad, curve, d0, d1 }) {
     const nums = [];
     for (const raw of values) { const v = +raw; if (raw != null && !Number.isNaN(v)) nums.push(v); }
-    // bandwidth/pad pass straight to fast-kde; omitted → its automatic (Scott) rule.
+    // fast-kde tunables (all optional): bandwidth (absolute kernel width),
+    // adjust (multiplier on the automatic Scott bandwidth), pad (domain padding).
     const kdeOpts = { bins: nBins };
     if (bandwidth != null) kdeOpts.bandwidth = bandwidth;
+    if (adjust != null) kdeOpts.adjust = adjust;
     if (pad != null) kdeOpts.pad = pad;
     const dens = Array.from(density1d(nums, kdeOpts)).filter((p) => p.x >= d0 && p.x <= d1);
     if (dens.length < 2) return;
     const maxY = Math.max(...dens.map((p) => p.y)) || 1;
     // "area" = one-sided fill (full `size` outward); "violin" = symmetric (± half).
-    const dPath = type === "area" ? areaPath(dens, maxY, size, curve) : violinPath(dens, maxY, size / 2);
+    const dPath = type === "area" ? areaPath(dens, maxY, size, curve) : violinPath(dens, maxY, size / 2, curve);
 
     const g = svgSel.append("g").attr("class", "za-scent").attr(
       "transform",
@@ -559,16 +563,18 @@ export function zoomableAxisInput(scaleOrDomain, {
   }
 
   // Build a closed symmetric area path centered on the axis line, in the scent
-  // <g>'s local space (origin on the axis line). along = scale(x); the density
-  // y maps to a half-thickness on each side. Mirrors violin-plot's x0/x1/y area.
-  function violinPath(pts, maxY, half) {
+  // <g>'s local space (origin on the axis line). along = scale(x); the density y
+  // maps to a half-thickness on each side. Uses d3-shape's area generator so the
+  // caller's `curve` applies to BOTH edges (straight segments ignored the curve);
+  // the two edges are y0=-cross / y1=+cross (x0/x1 when vertical).
+  function violinPath(pts, maxY, half, curve) {
     const along = (d) => scale(d.x);
     const cross = (d) => (d.y / maxY) * half;
-    const at = (a, c) => (horizontal ? `${a},${c}` : `${c},${a}`); // swap axes when vertical
-    let d = "";
-    pts.forEach((p, i) => { d += (i ? "L" : "M") + at(along(p), -cross(p)) + " "; }); // top edge
-    for (let i = pts.length - 1; i >= 0; i--) d += "L" + at(along(pts[i]), cross(pts[i])) + " "; // bottom edge
-    return d + "Z";
+    const c = curve || (horizontal ? curveMonotoneX : curveMonotoneY);
+    const gen = horizontal
+      ? d3area().x(along).y0((d) => -cross(d)).y1((d) => cross(d)).curve(c)
+      : d3area().y(along).x0((d) => -cross(d)).x1((d) => cross(d)).curve(c);
+    return gen(pts) || "";
   }
 
   // One-sided area (sparkline): baseline on the axis line (cross 0), the density
