@@ -66,7 +66,7 @@ const SCENT_TYPE_ORDER = [
 ];
 // Which scent params the settings panel tunes + persists (never `values`, colors,
 // controls flag, or persistKey). `curve` is stored as its name string.
-const SCENT_PERSIST_KEYS = ["type", "curve", "adjust", "pad", "bins", "size"];
+const SCENT_PERSIST_KEYS = ["type", "curve", "adjust", "pad", "bins", "size", "direction"];
 
 // Configurable persistence: a `persistKey` reads/writes localStorage (guarded for
 // SSR / privacy-mode failures). A consumer wanting a different store can ignore
@@ -141,7 +141,6 @@ function injectStyles() {
 }
 .zoomable-axis-input .za-scent-panel[hidden] { display: none; }
 .zoomable-axis-input .za-row { display: flex; align-items: center; gap: 8px; font-size: .72rem; }
-.zoomable-axis-input .za-row.za-disabled { opacity: .4; }
 .zoomable-axis-input .za-row > label { width: 58px; flex-shrink: 0; color: var(--za-panel-label, #9a9a9a); }
 .zoomable-axis-input .za-row select {
   flex: 1; min-width: 0; background: var(--za-panel-field, #101010);
@@ -250,8 +249,10 @@ export function zoomableAxisInput(scaleOrDomain, {
   format = (d) => `${Math.round(d)}`,
   // Scented-widget distribution drawn along the axis (Willett/Heer/Agrawala 2007):
   //   scent: { values:number[], type:"histogram"|"violin"|"area", style?:"kde"|"bars",
-  //            bins?:30, size?:24, color?:"#cbd5e1", colorSelected?, side?:"out"|"in"
-  //            (default "out" → grows away from the plot: bottom↓ top↑ left← right→),
+  //            bins?:30, size?:24, color?:"#cbd5e1", colorSelected?,
+  //            direction?:"out"|"in"  (histogram + area only; "out" grows away from
+  //            the plot: bottom↓ top↑ left← right→. histogram default "out", area "in".
+  //            `side` is an accepted alias. violin is symmetric, ignores it),
   //            bandwidth?, adjust?, pad?, curve? }
   //   KDE tunables (fast-kde): bandwidth (absolute), adjust (× the auto Scott
   //   bandwidth), pad (domain padding). `curve` applies to area AND violin, and may
@@ -273,6 +274,10 @@ export function zoomableAxisInput(scaleOrDomain, {
   const hasScent = !!(scent && scent.values && scent.values.length);
   injectStyles();
   const horizontal = orient === "bottom" || orient === "top";
+  // Cross-axis pixel offset of the domain line within the component. top/right axes
+  // put the line at `margin`; bottom/left inset it by half the thickness. Matches the
+  // axisG transform so handles, badges and scent all sit on the same line.
+  const axisCross = orient === "top" || orient === "right" ? margin : margin + thickness / 2;
   const scale = (typeof scaleOrDomain === "function" ? scaleOrDomain.copy() : scaleLinear().domain(scaleOrDomain))
     .range(horizontal ? [0, length] : [length, 0]);
   // Numeric domain bounds. scale.domain() returns Date objects for a d3 time
@@ -603,11 +608,11 @@ export function zoomableAxisInput(scaleOrDomain, {
       const T = 3; // line thickness
       if (horizontal) {
         bandLine.style.left = `${margin + lo}px`;
-        bandLine.style.top = `${margin + thickness / 2 - T / 2}px`;
+        bandLine.style.top = `${axisCross - T / 2}px`;
         bandLine.style.width = `${hi - lo}px`;
         bandLine.style.height = `${T}px`;
       } else {
-        bandLine.style.left = `${margin + thickness / 2 - T / 2}px`;
+        bandLine.style.left = `${axisCross - T / 2}px`;
         bandLine.style.top = `${margin + lo}px`;
         bandLine.style.width = `${T}px`;
         bandLine.style.height = `${hi - lo}px`;
@@ -622,7 +627,7 @@ export function zoomableAxisInput(scaleOrDomain, {
     labelHi.textContent = fmt(val[1]);
     if (horizontal) {
       const outDir = orient === "bottom" ? 1 : -1;
-      const ty = `${margin + thickness / 2 + outDir * (HR + STEM)}px`;
+      const ty = `${axisCross + outDir * (HR + STEM)}px`;
       const xfm = outDir > 0 ? "translate(-50%, 0)" : "translate(-50%, -100%)";
       const containerW = length + margin * 2;
       const loW = labelLo.offsetWidth || 50;
@@ -646,7 +651,7 @@ export function zoomableAxisInput(scaleOrDomain, {
       labelHi.style.left = `${hiC}px`; labelHi.style.top = ty;
     } else {
       const outDir = orient === "left" ? -1 : 1;
-      const tx = `${margin + thickness / 2 + outDir * (HR + STEM)}px`;
+      const tx = `${axisCross + outDir * (HR + STEM)}px`;
       const xfm = outDir < 0 ? "translate(-100%, -50%)" : "translate(0, -50%)";
       const containerH = length + margin * 2;
       const loH = labelLo.offsetHeight || 18;
@@ -663,8 +668,8 @@ export function zoomableAxisInput(scaleOrDomain, {
   // Draw a small histogram/violin of the data distribution along the axis (a
   // "scented widget": embedded info-scent so users see where the data is dense).
   function renderScent(svgSel, opts) {
-    const { values, type = "histogram", bins: nBins = 30, size = 24, color = "#cbd5e1", colorSelected, side,
-            style, bandwidth, adjust, pad, curve } = opts;
+    const { values, type = "histogram", bins: nBins = 30, size = 24, color = "#cbd5e1", colorSelected,
+            direction, side, style, bandwidth, adjust, pad, curve } = opts;
     // Clear any prior drawing so this can be re-invoked live (settings panel).
     svgSel.selectAll("*").remove();
     scentBars = [];
@@ -673,19 +678,20 @@ export function zoomableAxisInput(scaleOrDomain, {
     scentOut = color;
     scentIn = colorSelected || "var(--za-accent)";
     scentSize = size;
+    // One-sided draw direction (histogram + area). "out" = away from the plot,
+    // orientation-aware (bottom→down, top→up, left→left, right→right); "in" = toward
+    // the plot. `direction` is the public name; `side` is a back-compat alias.
+    // Histograms default "out" (marginal-plot convention — sits in the axis margin);
+    // areas default "in" (toward-plot sparkline that never collides with the badges).
+    // Violins are symmetric, so direction is ignored for them.
+    const effDir = direction ?? side ?? (type === "area" ? "in" : "out");
     // Violins/areas default to a smooth KDE (style "kde"); "bars" keeps the
-    // mirrored-bars look. Histograms are always bars. "area" is a one-sided
-    // sparkline fill (baseline on the axis, curve outward); "violin" mirrors it.
+    // mirrored-bars look. Histograms are always bars.
     const useKde = (type === "violin" || type === "area") && (style ?? "kde") === "kde";
     const [d0, d1] = scale.domain().map(Number);
-    if (useKde) { renderScentKde(svgSel, values, { type, nBins, size, bandwidth, adjust, pad, curve: curveFn, d0, d1 }); return; }
-    // Scent draw direction. "out" = away from the plot, which is orientation-aware
-    // (axisBottom → down, axisTop → up, axisLeft → left, axisRight → right); "in" =
-    // toward the plot. Default "out" so the distribution sits in the margin like a
-    // scatterplot's marginal histogram instead of overlapping the data points.
-    const effSide = side ?? "out";
+    if (useKde) { renderScentKde(svgSel, values, { type, nBins, size, bandwidth, adjust, pad, curve: curveFn, dir: effDir, d0, d1 }); return; }
     const outDir = orient === "bottom" || orient === "right" ? 1 : -1;
-    const sign = (effSide === "in" ? -1 : 1) * outDir;
+    const sign = (effDir === "in" ? -1 : 1) * outDir;
     const w = (d1 - d0) / nBins;
     const counts = new Array(nBins).fill(0);
     for (const raw of values) {
@@ -699,7 +705,7 @@ export function zoomableAxisInput(scaleOrDomain, {
     const maxN = Math.max(1, ...counts);
     const g = svgSel.append("g").attr("class", "za-scent").attr(
       "transform",
-      horizontal ? `translate(${margin},${margin + thickness / 2})` : `translate(${margin + thickness / 2},${margin})`
+      horizontal ? `translate(${margin},${axisCross})` : `translate(${axisCross},${margin})`
     );
     counts.forEach((n, i) => {
       if (!n) return;
@@ -727,7 +733,7 @@ export function zoomableAxisInput(scaleOrDomain, {
   // color and an overlay in the "in" color clipped to a rect that paintScent
   // slides to cover only the selected range. That two-tone-by-clip trick keeps
   // the silhouette continuous (no per-bin seams) while still coloring in-view.
-  function renderScentKde(svgSel, values, { type = "violin", nBins, size, bandwidth, adjust, pad, curve, d0, d1 }) {
+  function renderScentKde(svgSel, values, { type = "violin", nBins, size, bandwidth, adjust, pad, curve, dir = "in", d0, d1 }) {
     const nums = [];
     for (const raw of values) { const v = +raw; if (raw != null && !Number.isNaN(v)) nums.push(v); }
     // fast-kde tunables (all optional): bandwidth (absolute kernel width),
@@ -740,11 +746,11 @@ export function zoomableAxisInput(scaleOrDomain, {
     if (dens.length < 2) return;
     const maxY = Math.max(...dens.map((p) => p.y)) || 1;
     // "area" = one-sided fill (full `size` outward); "violin" = symmetric (± half).
-    const dPath = type === "area" ? areaPath(dens, maxY, size, curve) : violinPath(dens, maxY, size / 2, curve);
+    const dPath = type === "area" ? areaPath(dens, maxY, size, curve, dir) : violinPath(dens, maxY, size / 2, curve);
 
     const g = svgSel.append("g").attr("class", "za-scent").attr(
       "transform",
-      horizontal ? `translate(${margin},${margin + thickness / 2})` : `translate(${margin + thickness / 2},${margin})`
+      horizontal ? `translate(${margin},${axisCross})` : `translate(${axisCross},${margin})`
     );
     const clipId = `za-scent-clip-${++scentClipSeq}`;
     scentClipRect = g.append("clipPath").attr("id", clipId).append("rect").node();
@@ -776,10 +782,12 @@ export function zoomableAxisInput(scaleOrDomain, {
   // than straight segments, and monotone won't overshoot the baseline (a density
   // is non-negative, so no spurious dips below 0). Same local space as
   // violinPath, so the clip two-tone works unchanged.
-  function areaPath(pts, maxY, extent, curve) {
-    const upDir = orient === "bottom" || orient === "right" ? -1 : 1;
+  function areaPath(pts, maxY, extent, curve, dir = "in") {
+    // Cross-axis sign: "out" grows away from the plot, "in" toward it (default).
+    const outDir = orient === "bottom" || orient === "right" ? 1 : -1;
+    const crossSign = (dir === "in" ? -1 : 1) * outDir;
     const along = (d) => scale(d.x);
-    const cross = (d) => upDir * (d.y / maxY) * extent;
+    const cross = (d) => crossSign * (d.y / maxY) * extent;
     // Caller-supplied d3 curve factory wins; otherwise a monotone curve for the
     // along-axis (won't overshoot the baseline, since a density is non-negative).
     const c = curve || (horizontal ? curveMonotoneX : curveMonotoneY);
@@ -899,25 +907,28 @@ export function zoomableAxisInput(scaleOrDomain, {
     };
     gear.addEventListener("click", (e) => { e.stopPropagation(); setOpen(!open); });
 
-    const ctrls = []; // {el, get, disableWhenHist}
-    const isHist = () => (scentParams.type || "area") === "histogram";
-    const mkRow = (labelText, controlEl, disableWhenHist) => {
+    // Each row declares which scent types it `applies` to; syncControls() shows only
+    // those and hides the rest, so the panel only ever offers relevant options.
+    const ONE_SIDED = ["histogram", "area"];       // direction is meaningful
+    const SMOOTH = ["area", "violin"];             // KDE-only (curve/adjust/pad)
+    const ctrls = [];
+    const mkRow = (labelText, controlEl, applies) => {
       const row = document.createElement("div");
       row.className = "za-row";
       const lab = document.createElement("label");
       lab.textContent = labelText;
       row.appendChild(lab); row.appendChild(controlEl);
       panel.appendChild(row);
-      ctrls.push({ row, controlEl, disableWhenHist });
+      ctrls.push({ row, controlEl, applies });
     };
-    const mkSelect = (order, key, patchOf, disableWhenHist) => {
+    const mkSelect = (order, key, patchOf) => {
       const sel = document.createElement("select");
       for (const [v, t] of order) { const o = document.createElement("option"); o.value = v; o.textContent = t; sel.appendChild(o); }
       sel.addEventListener("change", () => updateScent(patchOf(sel.value)));
       sel._sync = () => { sel.value = key(scentParams); };
       return sel;
     };
-    const mkRange = (key, min, max, stepv, fmt, disableWhenHist) => {
+    const mkRange = (key, min, max, stepv, fmt) => {
       const wrap = document.createElement("span"); wrap.className = "za-range";
       const inp = document.createElement("input");
       inp.type = "range"; inp.min = min; inp.max = max; inp.step = stepv;
@@ -932,10 +943,14 @@ export function zoomableAxisInput(scaleOrDomain, {
       (v) => ({ type: v, style: v === "histogram" ? "bars" : "kde" }));
     mkRow("Shape", typeSel);
     const curveSel = mkSelect(CURVE_ORDER, (p) => (typeof p.curve === "string" ? p.curve : "basis"),
-      (v) => ({ curve: v }), true);
-    mkRow("Curve", curveSel, true);
-    mkRow("Smoothing", mkRange("adjust", 0.2, 3, 0.1, (v) => "×" + v.toFixed(1)), true);
-    mkRow("Pad", mkRange("pad", 0, 0.5, 0.02, (v) => (+v).toFixed(2)), true);
+      (v) => ({ curve: v }));
+    mkRow("Curve", curveSel, SMOOTH);
+    mkRow("Smoothing", mkRange("adjust", 0.2, 3, 0.1, (v) => "×" + v.toFixed(1)), SMOOTH);
+    mkRow("Pad", mkRange("pad", 0, 0.5, 0.02, (v) => (+v).toFixed(2)), SMOOTH);
+    const dirSel = mkSelect([["out", "Away from plot"], ["in", "Toward plot"]],
+      (p) => p.direction ?? p.side ?? ((p.type || "area") === "area" ? "in" : "out"),
+      (v) => ({ direction: v }));
+    mkRow("Direction", dirSel, ONE_SIDED);
     mkRow("Bins", mkRange("bins", 10, 120, 1, (v) => String(v)));
     mkRow("Height", mkRange("size", 12, 48, 1, (v) => v + "px"));
 
@@ -951,16 +966,13 @@ export function zoomableAxisInput(scaleOrDomain, {
     panel.appendChild(actions);
 
     function syncControls() {
-      const hist = isHist();
-      for (const { row, controlEl, disableWhenHist } of ctrls) {
+      const type = scentParams.type || "area";
+      for (const { row, controlEl, applies } of ctrls) {
         (controlEl._sync || (() => {}))();
-        const off = disableWhenHist && hist;
-        row.classList.toggle("za-disabled", !!off);
-        controlEl.querySelectorAll?.("input,select").forEach?.((n) => (n.disabled = off));
-        if (controlEl.tagName === "SELECT") controlEl.disabled = off;
+        row.style.display = !applies || applies.includes(type) ? "" : "none";
       }
     }
-    // Re-sync controls (values + enable/disable) whenever the type toggles.
+    // Re-sync controls (values + which rows are shown) whenever the type toggles.
     typeSel.addEventListener("change", () => syncControls());
     syncControls();
     container.node().appendChild(gear);
