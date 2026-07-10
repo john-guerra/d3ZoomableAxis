@@ -22,14 +22,19 @@
   "type": "module",
   "main": "src/index.js",
   "module": "src/index.js",
+  "types": "src/index.d.ts",
   "jsdelivr": "dist/d3-zoomable-axis.min.js",
   "unpkg": "dist/d3-zoomable-axis.min.js",
   "exports": {
     ".": {
+      "types": "./src/index.d.ts",
       "umd": "./dist/d3-zoomable-axis.min.js",
+      "import": "./src/index.js",
       "default": "./src/index.js"
     },
     "./input": {
+      "types": "./src/input.d.ts",
+      "import": "./src/input.js",
       "default": "./src/input.js"
     },
     "./package.json": "./package.json"
@@ -37,7 +42,8 @@
   "sideEffects": false,
   "files": [
     "dist/**/*.js",
-    "src/**/*.js"
+    "src/**/*.js",
+    "src/**/*.d.ts"
   ],
   "scripts": {
     "test": "node --test",
