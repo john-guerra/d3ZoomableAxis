@@ -80,7 +80,6 @@
         .attr("fill", d => COLORS[species(d)] || "#888")
         .attr("cx", d => x(d[X])).attr("cy", d => y(d[Y]));
     }
-    draw();
 
     // x zoomable axis (bottom), full extent; selection = plot x-domain
     const xAxis = zoomableAxisInput(scaleLinear().domain(xExtent), {
@@ -106,9 +105,198 @@
     const out = document.getElementById("out");
     const report = () => out.textContent =
       `x (flipper) = [${xAxis.value.map(v=>v.toFixed(0))}] mm   ·   y (mass) = [${yAxis.value.map(v=>v.toFixed(0))}] g   ·   ${data.length} penguins`;
-    report();
+    draw(); report(); // initial paint AFTER both plot domains match the axes' start values
 
     window.__demo = { xAxis, yAxis, x, y };
+  </script>
+
+  <!-- ─── Variant 1b: FILTER instead of zoom (dynamic query), top + right axes ─── -->
+  <h2 style="margin-top:3rem">Filter instead of zoom (dynamic query)</h2>
+  <p class="hint">Same idea, but the axes sit on the <b>top</b> (x) and <b>right</b> (y) — the range
+  <em>filters</em> rather than zooms: the scales stay at full extent, points inside the selected
+  x <b>and</b> y window keep their species color, the rest grey out. Each scent grows <em>away from
+  the plot</em> (top histogram upward, right histogram rightward), showing the orientation-aware
+  direction. This is the Shneiderman/Ahlberg dynamic-query pattern.</p>
+  <div id="plotWrapF" style="position:relative;margin-top:1rem"></div>
+  <p class="out hint" id="outF">—</p>
+
+  <script type="module">
+    import { select } from "d3-selection";
+    import { scaleLinear } from "d3-scale";
+    import { zoomableAxisInput } from "../src/input.js";
+
+    const X = "Flipper Length (mm)", Y = "Body Mass (g)";
+    const COLORS = { "Adelie": "#ff8c00", "Chinstrap": "#9932cc", "Gentoo": "#008080" };
+    const species = (d) => (d.Species || "").split(" ")[0];
+    const raw = await fetch("https://cdn.jsdelivr.net/npm/vega-datasets@2/data/penguins.json").then(r => r.json());
+    const data = raw.filter(d => d[X] != null && d[Y] != null);
+
+    const plotW = 460, plotH = 360, AXMARGIN = 22;
+    // Top axis sits above the plot, right axis to its right — reserve margins there.
+    const leftPad = 30, topPad = 80, rightPad = 90;
+    const xExtent = [Math.min(...data.map(d => d[X])), Math.max(...data.map(d => d[X]))];
+    const yExtent = [Math.min(...data.map(d => d[Y])), Math.max(...data.map(d => d[Y]))];
+    // Fixed full-extent scales — a filter demo never changes the plot's domain.
+    const x = scaleLinear().domain(xExtent).range([0, plotW]);
+    const y = scaleLinear().domain(yExtent).range([plotH, 0]);
+
+    const wrap = select("#plotWrapF")
+      .style("width", `${leftPad + plotW + rightPad}px`).style("height", `${topPad + plotH + 20}px`);
+    const svg = wrap.append("svg")
+      .style("position","absolute").style("left",`${leftPad}px`).style("top",`${topPad}px`)
+      .style("z-index","2").style("pointer-events","none")
+      .attr("width", plotW + 20).attr("height", plotH + 20);
+    svg.append("clipPath").attr("id","plotClipF").append("rect").attr("width",plotW).attr("height",plotH);
+    const gPts = svg.append("g").attr("clip-path","url(#plotClipF)");
+    svg.append("rect").attr("width",plotW).attr("height",plotH).attr("fill","none").attr("stroke","#ddd");
+
+    const inRange = (d) => {
+      const [x0, x1] = xAxis.value, [y0, y1] = yAxis.value;
+      return d[X] >= x0 && d[X] <= x1 && d[Y] >= y0 && d[Y] <= y1;
+    };
+    // Cross-fade selected vs filtered-out; positions never change (no zoom).
+    function draw() {
+      gPts.selectAll("circle").data(data).join("circle")
+        .attr("r", 3.5)
+        .attr("cx", d => x(d[X])).attr("cy", d => y(d[Y]))
+        .attr("fill", d => inRange(d) ? (COLORS[species(d)] || "#888") : "#c8ccd0")
+        .attr("fill-opacity", d => inRange(d) ? 0.85 : 0.18);
+      report();
+    }
+
+    // Top x-axis: axis line flush with the plot's TOP edge.
+    const xAxis = zoomableAxisInput(scaleLinear().domain(xExtent), {
+      orient:"top", step:1, length:plotW, value:[195, 220], label:"Flipper length", units:"mm",
+      scent: { values: data.map(d => d[X]), type: "histogram", bins: 28 },
+    });
+    xAxis.style.position="absolute"; xAxis.style.left=`${leftPad-AXMARGIN}px`; xAxis.style.top=`${topPad-AXMARGIN}px`;
+    xAxis.addEventListener("input", draw);
+    wrap.node().appendChild(xAxis);
+
+    // Right y-axis: axis line flush with the plot's RIGHT edge.
+    const yAxis = zoomableAxisInput(scaleLinear().domain(yExtent), {
+      orient:"right", step:25, length:plotH, value:[4000, 5500], label:"Body mass", units:"g",
+      scent: { values: data.map(d => d[Y]), type: "histogram", bins: 28 },
+    });
+    yAxis.style.position="absolute"; yAxis.style.left=`${leftPad+plotW-AXMARGIN}px`; yAxis.style.top=`${topPad-AXMARGIN}px`;
+    yAxis.addEventListener("input", draw);
+    wrap.node().appendChild(yAxis);
+
+    const outF = document.getElementById("outF");
+    const report = () => {
+      const n = data.filter(inRange).length;
+      outF.textContent =
+        `filter x = [${xAxis.value.map(v=>v.toFixed(0))}] mm · y = [${yAxis.value.map(v=>v.toFixed(0))}] g` +
+        `  →  ${n} of ${data.length} penguins in range`;
+    };
+    draw();
+
+    window.__filter = { xAxis, yAxis, inRange };
+  </script>
+
+  <!-- ─── Variant 1c: FILTER synced with a 2D box brush (reactivewidgets) ─── -->
+  <h2 style="margin-top:3rem">Filter synced with a box brush</h2>
+  <p class="hint">The two axes and a 2D box brush on the plot are three views of one shared
+  <code>[xRange, yRange]</code> selection, kept in sync the reactivewidgets.org way: each view's
+  programmatic update is silent, so moving the brush drives the axes and moving an axis drives the
+  brush — no feedback loop. Drag a box on the scatter, or drag either axis; the in-range points and
+  both scents update together.</p>
+  <div id="plotWrapB" style="position:relative;margin-top:1rem"></div>
+  <p class="out hint" id="outB">—</p>
+
+  <script type="module">
+    import { select } from "d3-selection";
+    import { scaleLinear } from "d3-scale";
+    import { brush as d3brush } from "d3-brush";
+    import { zoomableAxisInput } from "../src/input.js";
+
+    const X = "Flipper Length (mm)", Y = "Body Mass (g)";
+    const COLORS = { "Adelie": "#ff8c00", "Chinstrap": "#9932cc", "Gentoo": "#008080" };
+    const species = (d) => (d.Species || "").split(" ")[0];
+    const raw = await fetch("https://cdn.jsdelivr.net/npm/vega-datasets@2/data/penguins.json").then(r => r.json());
+    const data = raw.filter(d => d[X] != null && d[Y] != null);
+
+    const plotW = 460, plotH = 360, vAxis = 64;
+    const AXMARGIN = 22, AXTHICK = 44, axLine = AXMARGIN + AXTHICK / 2;
+    const xExtent = [Math.min(...data.map(d => d[X])), Math.max(...data.map(d => d[X]))];
+    const yExtent = [Math.min(...data.map(d => d[Y])), Math.max(...data.map(d => d[Y]))];
+    // Fixed full-extent scales — filtering never rescales the plot.
+    const x = scaleLinear().domain(xExtent).range([0, plotW]);
+    const y = scaleLinear().domain(yExtent).range([plotH, 0]);
+
+    const wrap = select("#plotWrapB").style("width", `${vAxis + plotW + 30}px`).style("height", `${plotH + 56}px`);
+    const svg = wrap.append("svg")
+      .style("position","absolute").style("left",`${vAxis}px`).style("top","0")
+      .style("z-index","2").style("pointer-events","none")
+      .attr("width", plotW + 20).attr("height", plotH + 20);
+    svg.append("clipPath").attr("id","plotClipB").append("rect").attr("width",plotW).attr("height",plotH);
+    // Brush layer under the points; opts back into pointer events despite svg none.
+    const gBrush = svg.append("g").attr("class","brush").style("pointer-events","all");
+    const gPts = svg.append("g").attr("clip-path","url(#plotClipB)");
+    svg.append("rect").attr("width",plotW).attr("height",plotH).attr("fill","none").attr("stroke","#ddd");
+
+    const inRange = (d) => {
+      const [x0, x1] = xAxis.value, [y0, y1] = yAxis.value;
+      return d[X] >= x0 && d[X] <= x1 && d[Y] >= y0 && d[Y] <= y1;
+    };
+    function draw() {
+      gPts.selectAll("circle").data(data).join("circle")
+        .attr("r", 3.5)
+        .attr("cx", d => x(d[X])).attr("cy", d => y(d[Y]))
+        .attr("fill", d => inRange(d) ? (COLORS[species(d)] || "#888") : "#c8ccd0")
+        .attr("fill-opacity", d => inRange(d) ? 0.85 : 0.18);
+      const n = data.filter(inRange).length;
+      document.getElementById("outB").textContent =
+        `x = [${xAxis.value.map(v=>v.toFixed(0))}] mm · y = [${yAxis.value.map(v=>v.toFixed(0))}] g` +
+        `  →  ${n} of ${data.length} penguins in range`;
+    }
+
+    const xAxis = zoomableAxisInput(scaleLinear().domain(xExtent), {
+      orient:"bottom", step:1, length:plotW, value:[195,220], label:"Flipper length", units:"mm",
+      scent: { values: data.map(d => d[X]), type:"histogram", bins:28 },
+    });
+    xAxis.style.position="absolute"; xAxis.style.left=`${vAxis-AXMARGIN}px`; xAxis.style.top=`${plotH-axLine}px`;
+    wrap.node().appendChild(xAxis);
+
+    const yAxis = zoomableAxisInput(scaleLinear().domain(yExtent), {
+      orient:"left", step:25, length:plotH, value:[4000,5500], label:"Body mass", units:"g",
+      scent: { values: data.map(d => d[Y]), type:"violin", bins:28 },
+    });
+    yAxis.style.position="absolute"; yAxis.style.left=`${vAxis-axLine}px`; yAxis.style.top=`${-AXMARGIN}px`;
+    wrap.node().appendChild(yAxis);
+
+    // ── Reactive sync: axes ⇄ brush are views on one [xRange, yRange] state.
+    // `syncing` guards programmatic updates so neither view re-triggers the other.
+    let syncing = false;
+    const brush = d3brush().extent([[0,0],[plotW,plotH]]).on("brush end", brushed);
+    gBrush.call(brush);
+
+    const axesToBox = () => {
+      const [x0,x1] = xAxis.value, [y0,y1] = yAxis.value;
+      return [[x(x0), y(y1)], [x(x1), y(y0)]]; // y range is inverted (top = max value)
+    };
+    function syncBrushFromAxes() {
+      syncing = true;
+      gBrush.call(brush.move, axesToBox());
+      syncing = false;
+      draw();
+    }
+    function brushed(ev) {
+      if (syncing) return;         // programmatic move — ignore
+      if (!ev.selection) return;   // cleared — keep the last window
+      const [[bx0,by0],[bx1,by1]] = ev.selection;
+      syncing = true;
+      xAxis.value = [x.invert(bx0), x.invert(bx1)];
+      yAxis.value = [y.invert(by1), y.invert(by0)]; // bottom pixel = min, top = max
+      syncing = false;
+      draw();
+    }
+    xAxis.addEventListener("input", syncBrushFromAxes);
+    yAxis.addEventListener("input", syncBrushFromAxes);
+
+    syncBrushFromAxes(); // place the brush box to match the axes, then paint
+
+    window.__brushsync = { xAxis, yAxis, brush, gBrush, x, y, inRange };
   </script>
 
   <!-- ─── Variant 2: same axes WITHOUT the scented distribution ─── -->
@@ -145,7 +333,6 @@
     const draw = () => gPts.selectAll("circle").data(data).join("circle")
       .attr("r",3.5).attr("fill-opacity",.75).attr("fill",d=>COLORS[species(d)]||"#888")
       .attr("cx",d=>x(d[X])).attr("cy",d=>y(d[Y]));
-    draw();
 
     const xAxis = zoomableAxisInput(scaleLinear().domain(xExtent), {
       orient:"bottom", step:1, length:plotW, value:xExtent, label:"Flipper length", units:"mm"
@@ -161,39 +348,7 @@
     yAxis.style.position="absolute"; yAxis.style.left=`${vAxis-axLine}px`; yAxis.style.top=`${-AXMARGIN}px`;
     yAxis.addEventListener("input", () => { y.domain(yAxis.value); draw(); });
     wrap.node().appendChild(yAxis);
-  </script>
-
-  <!-- ─── Variant 3: plain native range sliders (baseline reference) ─── -->
-  <h2 style="margin-top:3rem">Plain range sliders (baseline)</h2>
-  <p class="hint">Unadorned native <code>&lt;input type=range&gt;</code> for comparison. No axis, no scent.</p>
-  <div id="plainWrap" style="margin-top:1rem;display:flex;flex-direction:column;gap:1rem">
-    <label style="display:flex;align-items:center;gap:.5rem">
-      Flipper lo
-      <input id="pXlo" type="range" min="170" max="235" value="170" step="1">
-      <span id="pXloV">170</span> mm
-    </label>
-    <label style="display:flex;align-items:center;gap:.5rem">
-      Flipper hi
-      <input id="pXhi" type="range" min="170" max="235" value="235" step="1">
-      <span id="pXhiV">235</span> mm
-    </label>
-    <label style="display:flex;align-items:center;gap:.5rem">
-      Mass lo
-      <input id="pYlo" type="range" min="2700" max="6300" value="2700" step="25">
-      <span id="pYloV">2700</span> g
-    </label>
-    <label style="display:flex;align-items:center;gap:.5rem">
-      Mass hi
-      <input id="pYhi" type="range" min="2700" max="6300" value="6300" step="25">
-      <span id="pYhiV">6300</span> g
-    </label>
-  </div>
-  <script>
-    ["pXlo","pXhi","pYlo","pYhi"].forEach(id => {
-      const el = document.getElementById(id);
-      const lbl = document.getElementById(id + "V");
-      el.addEventListener("input", () => lbl.textContent = el.value);
-    });
+    draw(); // initial paint AFTER y.domain matches the y-axis' start value
   </script>
 </body>
 </html>
