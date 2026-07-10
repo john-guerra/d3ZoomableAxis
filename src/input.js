@@ -251,7 +251,7 @@ export function zoomableAxisInput(scaleOrDomain, {
   // Scented-widget distribution drawn along the axis (Willett/Heer/Agrawala 2007):
   //   scent: { values:number[], type:"histogram"|"violin"|"area", style?:"kde"|"bars",
   //            bins?:30, size?:24, color?:"#cbd5e1", colorSelected?, side?:"out"|"in"
-  //            (histogram default "in" → bars grow toward the plot; area default "out"),
+  //            (default "out" → grows away from the plot: bottom↓ top↑ left← right→),
   //            bandwidth?, adjust?, pad?, curve? }
   //   KDE tunables (fast-kde): bandwidth (absolute), adjust (× the auto Scott
   //   bandwidth), pad (domain padding). `curve` applies to area AND violin, and may
@@ -679,11 +679,11 @@ export function zoomableAxisInput(scaleOrDomain, {
     const useKde = (type === "violin" || type === "area") && (style ?? "kde") === "kde";
     const [d0, d1] = scale.domain().map(Number);
     if (useKde) { renderScentKde(svgSel, values, { type, nBins, size, bandwidth, adjust, pad, curve: curveFn, d0, d1 }); return; }
-    // Histogram draw direction. "out" = away from the plot (axisBottom → down,
-    // axisTop → up, axisLeft → left, axisRight → right); "in" = toward the plot.
-    // Histograms default to "in" so bars grow UP from a bottom axis (bar-chart
-    // convention); one-sided "area" sparklines default to "out" (fill below).
-    const effSide = side ?? (type === "area" ? "out" : "in");
+    // Scent draw direction. "out" = away from the plot, which is orientation-aware
+    // (axisBottom → down, axisTop → up, axisLeft → left, axisRight → right); "in" =
+    // toward the plot. Default "out" so the distribution sits in the margin like a
+    // scatterplot's marginal histogram instead of overlapping the data points.
+    const effSide = side ?? "out";
     const outDir = orient === "bottom" || orient === "right" ? 1 : -1;
     const sign = (effSide === "in" ? -1 : 1) * outDir;
     const w = (d1 - d0) / nBins;
