@@ -220,12 +220,15 @@ export function zoomableAxisInput(scaleOrDomain, {
     return g;
   };
   // Semicircle path: flat diameter through the endpoint on the axis line, curved
-  // side bulging in the `outward` pixel direction (−1/+1). `outward>0` → sweep 1.
+  // side bulging in the `outward` pixel direction (−1/+1). The sweep flag maps to
+  // the bulge direction OPPOSITELY between the two branches: for the horizontal
+  // axis the diameter is vertical and sweep 1 bulges +x; for the vertical axis the
+  // diameter is horizontal and sweep 1 bulges −y. So the vertical branch inverts
+  // the flag to keep "outward > 0 ⇒ larger pixel" consistent across orientations.
   const knobPath = (px, outward) => {
-    const s = outward > 0 ? 1 : 0;
     return horizontal
-      ? `M ${px} ${-KNOB_R} A ${KNOB_R} ${KNOB_R} 0 0 ${s} ${px} ${KNOB_R} Z`
-      : `M ${-KNOB_R} ${px} A ${KNOB_R} ${KNOB_R} 0 0 ${s} ${KNOB_R} ${px} Z`;
+      ? `M ${px} ${-KNOB_R} A ${KNOB_R} ${KNOB_R} 0 0 ${outward > 0 ? 1 : 0} ${px} ${KNOB_R} Z`
+      : `M ${-KNOB_R} ${px} A ${KNOB_R} ${KNOB_R} 0 0 ${outward > 0 ? 0 : 1} ${KNOB_R} ${px} Z`;
   };
   // Along-axis pixel direction of INCREASING value (+1 for range [0,len], −1 for
   // [len,0]). lo bulges toward smaller values, hi toward larger — i.e. outward.
