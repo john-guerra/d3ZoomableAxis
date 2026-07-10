@@ -7,42 +7,51 @@ the zoom control, so it lines up with your chart by construction (no pixel-offse
 
 > npm: `@john-guerra/d3-zoomable-axis` · status: **early (0.0.x)**
 
-**Accessible by design.** The handles are real `<input type="range">` elements, so the control is
-keyboard-operable (arrows / Page / Home / End), screen-reader announced (named sliders with
-`aria-valuetext`), and works as standard HTML form inputs — no custom ARIA-slider reimplementation.
+## Two entry points
 
-Two API layers:
+The package ships two independent layers — import only what you need:
 
-1. **Core d3 component** — the [d3 idiom](./docs/d3-api-style.md): a factory applied via
-   `selection.call(...)`, chainable accessors, `d3-dispatch` events.
-2. **Reactive-widget convenience** — the [reactivewidgets.org](https://reactivewidgets.org)
-   pattern: returns a DOM element with `.value` `[lo,hi]` that dispatches `input`, so it works
-   with Observable `view()`.
+| Import | What you get |
+| --- | --- |
+| `@john-guerra/d3-zoomable-axis` | **Core** d3 component — `zoomableAxis{Bottom,Top,Left,Right}`, a [d3-idiom](./docs/d3-api-style.md) factory applied via `selection.call(...)`, built on `d3-brush`. Chainable accessors, `d3-dispatch` events. Dependency-light. |
+| `@john-guerra/d3-zoomable-axis/input` | **Accessible reactive widget** — `zoomableAxisInput`, a DOM element with `.value` `[lo, hi]` that dispatches `input` ([reactivewidgets.org](https://reactivewidgets.org) / Observable `view()`). Native `<input type=range>` handles, a scented distribution overlay, drag-to-pan, editable value badges, and a live settings panel. |
+
+Splitting the entries keeps the core free of the widget's optional peer
+(`reactive-widget-helper`) and density deps (`fast-kde`, `d3-shape`) — those are only pulled
+in when you import `/input`.
+
+**Accessibility** is a property of the **widget** layer: its handles are real
+`<input type="range">` elements — keyboard-operable (arrows / Page / Home / End),
+screen-reader announced (named sliders with `aria-valuetext`), and standard HTML form inputs.
+The core `zoomableAxis*` factories are `d3-brush`-based (pointer/touch; not keyboard-accessible).
 
 ## Install
 
 ```bash
 npm install @john-guerra/d3-zoomable-axis
+# for the widget layer, also install its optional peer:
+npm install reactive-widget-helper
 ```
 
-When bundling, the `d3-*` submodules and [`fast-kde`](https://www.npmjs.com/package/fast-kde)
-(used for the optional density overlay) come along as regular dependencies — nothing extra to do.
+When bundling, the `d3-*` submodules (and, for the widget, `fast-kde`) come along as regular
+dependencies — nothing extra to do.
 
-### From a CDN (script tag)
+### From a CDN (script tag) — core only
 
-The UMD bundle is **peer-global**: to keep it small it does *not* embed d3 or `fast-kde`, so you
-must load both first. `d3` provides the `d3-*` submodules (shared global `d3`), and `fast-kde`
-must be present as the global `fastKde`:
+The UMD bundle is the **core** layer and is **peer-global**: to keep it small it does *not*
+embed d3, so load d3 first. The factories merge into the shared global `d3`:
 
 ```html
 <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
-<script src="https://cdn.jsdelivr.net/npm/fast-kde@0.2"></script> <!-- exposes window.fastKde -->
 <script src="https://cdn.jsdelivr.net/npm/@john-guerra/d3-zoomable-axis"></script>
 <script>
   // factories are merged into the shared global `d3`
   const slider = d3.zoomableAxisBottom(d3.scaleLinear().domain([24, 92]).range([0, 600]));
 </script>
 ```
+
+The widget layer is ESM-only; import it from a bundler, or over ESM from
+`https://cdn.jsdelivr.net/npm/@john-guerra/d3-zoomable-axis/src/input.js`.
 
 ## Core component (d3 idiom)
 
@@ -74,20 +83,59 @@ Factories: `zoomableAxisBottom`, `zoomableAxisTop`, `zoomableAxisLeft`, `zoomabl
 in data space (inverted from pixels, snapped to `step`). Imperative `slider.move(g, [lo,hi])`
 sets and emits; `slider.value([lo,hi])` sets silently.
 
-## Reactive-widget (Observable / reactivewidgets.org)
+## Reactive widget (Observable / reactivewidgets.org)
 
 ```js
-import { zoomableAxisInput } from "@john-guerra/d3-zoomable-axis";
+import { zoomableAxisInput } from "@john-guerra/d3-zoomable-axis/input";
 
 const weeks = view(zoomableAxisInput([24, 92], {
   orient: "bottom", step: 1, length: 600, value: [30, 60],
+  label: "Weeks", units: "wk",
 }));
 // `weeks` is reactive [lo, hi]; the element has .value and dispatches "input".
 ```
 
+Drag a handle to resize an end, drag the band between the handles to **pan** the window, or
+**double-click a value badge** to type an exact value (an OS-native `number` / `date` /
+`datetime-local` / `time` picker, via the `inputType` option). Every handle is a
+keyboard-focusable native slider.
+
+Key options: `orient`, `step`, `length`, `value`, `label`, `units`, `format`, `inputType`
+(`"number"` | `"date"` | `"time"` | `"datetime-local"`), `ticks`, `thickness`, `margin`, and
+`scent` (below). Events: `input` (DOM, on the element) plus `start` / `input` / `end` / `scent`
+via `el.on(...)`.
+
+### Scented distribution
+
+Pass `scent` to draw the data distribution along the axis (a
+[scented widget](https://idl.cs.washington.edu/papers/scented-widgets/) — see where the data is
+dense before you zoom). A ⚙ settings panel lets you retune it live.
+
+```js
+zoomableAxisInput([170, 235], {
+  orient: "bottom", length: 600, value: [190, 215],
+  scent: {
+    values: flipperLengths,   // number[]
+    type: "histogram",        // "histogram" | "violin" | "area"
+    bins: 28,
+    direction: "out",         // "out" = away from the plot, "in" = toward it
+  },
+});
+```
+
+`scent` options: `type`, `bins`, `size`, `direction` (`"out"` | `"in"`; histogram + area only —
+`side` is an alias), `style` (`"kde"` | `"bars"`), `color`, `colorSelected`, KDE tunables
+(`bandwidth`, `adjust`, `pad`), `curve` (a d3-shape curve factory or name string), `controls`
+(the ⚙ panel — on by default; `false` to hide), and `persistKey` (remember tuned params in
+`localStorage`). Panel edits also fire a `scent` event (`el.on("scent", params => …)`).
+
+See [`examples/demo.html`](./examples/demo.html) for live zoom, dynamic-query filtering, and a
+brush-synced example (and [`examples/test-local.html`](./examples/test-local.html) for an
+offline smoke test).
+
 ## Design & background
 
-- [docs/DESIGN.md](./docs/DESIGN.md) — architecture, API, packaging plan.
+- [docs/DESIGN.md](./docs/DESIGN.md) — architecture, API, packaging.
 - [docs/d3-api-style.md](./docs/d3-api-style.md) — the d3 reusable-component idiom reference.
 - [docs/history-direct-manipulation-rangesliders.md](./docs/history-direct-manipulation-rangesliders.md)
   — Shneiderman & Plaisant dynamic-query range sliders and design takeaways.

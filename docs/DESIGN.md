@@ -1,6 +1,6 @@
 # d3-zoomable-axis — Design
 
-**Package:** `@john-guerra/d3-zoomable-axis` · **Status:** core implemented, browser-verification + adoption pending.
+**Package:** `@john-guerra/d3-zoomable-axis` · **Status:** published **0.0.3** (npm), browser-verified.
 
 ## Motivation
 
@@ -10,157 +10,123 @@ aligning it with pixel math against the chart's margins/padding/label offsets �
 range handles, sharing the chart's scale, so it aligns by construction.
 
 It is built in the **d3 module idiom** (Bostock/Fil): a factory returning a function applied via
-`selection.call(...)`, chainable getter/setters, composing existing `d3-*` modules. It also ships
-a thin **reactive-widget** wrapper so it drops into Observable `view()` and the reactivewidgets.org
-ecosystem.
+`selection.call(...)`, chainable getter/setters, composing existing `d3-*` modules. On top of that
+core it ships an accessible **reactive-widget** layer that drops into Observable `view()` and the
+[reactivewidgets.org](https://reactivewidgets.org) ecosystem.
 
-**Accessibility is a first-class requirement** (not a retrofit): full keyboard control, screen-reader
-support, and **standard HTML form inputs** under the hood. This is the decisive reason the interaction
-layer is built from native `<input type="range">` elements rather than an SVG `d3-brush` (which is not
-focusable, keyboard-operable, or announced). See the Accessibility section.
+## Two layers, two entry points
 
-## API
+The package ships two independent layers, each with its own entry point:
 
-### Core component (`src/zoomableAxis.js`)
+| Entry | Module | Interaction | Extra deps |
+| --- | --- | --- | --- |
+| `.` (main) | `src/zoomableAxis.js` | **Core** — a `d3-brush` on the axis line, pointer/touch | — |
+| `./input` | `src/input.js` | **Accessible widget** — native `<input type=range>` handles + scent + settings panel | d3-scale, d3-shape, fast-kde, `reactive-widget-helper` (optional peer) |
 
-`zoomableAxis{Bottom,Top,Left,Right}(scale)` → a component function.
+Both share the pure `src/snap.js` (order / clamp / step-snap). They do **not** share rendering or
+geometry — the core is a compact d3 component; the widget is where the rich UI lives. Keeping them
+as separate imports means a core-only consumer never pulls in the widget's peer/density deps.
 
-- **Render:** `selection.call(slider)` draws a d3 axis (via `d3-axis`) + a constrained brush
-  (via `d3-brush`) on a thin band along the axis line. Transition-aware.
-- **Value:** `[lo, hi]` in **data space**. Brush selection (pixels) is inverted through the scale
-  and snapped to `step` (`src/snap.js`). `value()` getter returns a copy; `value([lo,hi])` sets
-  silently (re-renders, no event) — the controlled-state pattern that prevents feedback loops.
+> Historical note: an early plan was to unify on native inputs for accessibility across *both*
+> layers. In practice the core kept its `d3-brush` implementation (compact, transition-aware,
+> pointer-driven), and the accessible native-input design lives only in the widget. The two are
+> maintained as distinct, separately-imported layers rather than one merged component.
+
+## Core component (`src/zoomableAxis.js`) — the `.` entry
+
+`zoomableAxis{Bottom,Top,Left,Right}(scale)` → a component function applied via `selection.call`.
+
+- **Render:** a d3 axis (via `d3-axis`) + a constrained brush (via `d3-brush`) on a thin band along
+  the axis line. Transition-aware.
+- **Value:** `[lo, hi]` in **data space**. Brush pixels are inverted through the scale and snapped to
+  `step` (`src/snap.js`). `value()` returns a copy; `value([lo,hi])` sets silently (re-render, no
+  event) — the controlled-state pattern that avoids feedback loops.
 - **Events** (`d3-dispatch`): `start`, `input` (during drag), `end`; each listener gets `[lo,hi]`.
-- **Imperative:** `move(g, [lo,hi])` sets *and* emits (mirrors `brush.move`).
+- **Imperative:** `move(g,[lo,hi])` sets *and* emits (mirrors `brush.move`).
 - **Accessors:** `scale, value, step, handleSize, ticks, tickArguments, tickValues, tickFormat,
-  tickSize, tickSizeInner, tickSizeOuter, tickPadding, on` — d3-axis getter/setter idiom
-  (`arguments.length ? (set, component) : value`).
+  tickSize, tickSizeInner, tickSizeOuter, tickPadding, on` (d3 getter/setter idiom).
+- **Accessibility:** pointer/touch only — the brush is not keyboard-focusable or screen-reader
+  announced. Use the widget layer when accessibility matters.
 
-### Reactive-widget convenience (`src/input.js`)
+## Reactive widget (`src/input.js`) — the `./input` entry
 
 `zoomableAxisInput(scaleOrDomain, opts)` → an `HTMLElement` enhanced with `reactive-widget-helper`:
-`.value` is `[lo,hi]`, dispatches `input`. Builds its own `<svg><g>`, applies the core component,
-bridges core `input` → `widget.setValue` → `input` event; external `setValue`/`value` re-renders
-the core. Optional peer dep (only this layer needs it).
+`.value` is `[lo,hi]` and dispatches `input`; `el.on(...)` also exposes `start`/`input`/`end`/`scent`
+(via `d3-dispatch`). External `setValue`/`value` re-renders silently.
 
-### Pure helpers (`src/snap.js`)
+**Accessible by construction:** the two handles are real `<input type="range">` elements — keyboard
+(`←/↓ →/↑`, `PageUp/Down`, `Home/End`), screen-reader announced (`aria-label` + `aria-valuetext`),
+standard form controls, clamped so `lo ≤ hi`. Pointer interaction is layered on top:
 
-`snapRange([lo,hi], domain, step)` / `snapValue(v, domain, step)` — order, clamp to domain, snap to
-step; domain endpoints stay reachable when step doesn't divide the span. No d3/DOM deps; unit-tested.
+- **Musical-note handles:** a tick (value marker) + stem + an outward half-disc **knob** (the resize
+  grab target), drawn in an SVG layer above the scent.
+- **Value badges:** a pill at each stem tip showing the formatted value — **draggable**, and
+  **double-click to edit** via an inline native input (`inputType`: `number`/`date`/`time`/`datetime-local`).
+- **Drag-to-pan:** dragging the band between the handles moves the whole window; the outward knobs
+  resize the ends.
+- **Orientation-aware placement** (bottom/top/left/right) via an `axisCross` offset, so handles,
+  badges, the selection line, and the scent all sit on the domain line.
 
-## Internals
+### Scent (scented distribution)
 
-```
-zoomableAxis(orient, scale)
-├── d3-axis     → ticks + labels + domain line for `scale`  (decorative; aria-hidden)
-├── 2× <input type="range">  → the accessible dual handles (lo + hi), overlaid on the axis
-│       • native role=slider, focusable, keyboard, screen-reader announced
-│       • shared min/max/step from scale.domain()/step; clamp lo ≤ hi on input
-│       • aria-label per thumb + aria-valuetext (formatted value + units)
-├── d3-scale    → map data <-> pixels for positioning the inputs over the axis
-├── snap.js     → order / clamp / step-snap (mirrors native step)
-└── d3-dispatch → start / input / end  (+ .on copy/forward)
-```
+`scent: { values, type, … }` draws the data distribution along the axis (Willett/Heer/Agrawala
+scented widgets — see where data is dense before zooming):
 
-The native inputs are the **source of truth and the a11y surface**; the d3 axis is the visual
-ticks/labels layer behind them. (Earlier scaffolding used `d3-brush`; replaced for accessibility.)
+- **`type`:** `"histogram"` (bars) · `"violin"` (symmetric KDE) · `"area"` (one-sided KDE sparkline).
+- **`direction`** (alias `side`): `"out"` = away from the plot, orientation-aware (bottom↓ top↑
+  left← right→); `"in"` = toward it. Histogram + area only (violin is symmetric). Histogram defaults
+  `"out"`, area `"in"`.
+- **`style`:** `"kde"` | `"bars"` (violins/areas default to smooth KDE via `fast-kde`).
+- **KDE tunables:** `bandwidth`, `adjust`, `pad`; **`curve`** (a d3-shape curve factory or a name
+  string: basis/natural/monotone/catmullRom/linear/step).
+- **Appearance:** `bins`, `size`, `color`, `colorSelected`.
+- **Two-tone by selection:** the in-range portion uses the accent color, the rest grey — bars are
+  recolored per-bin; KDE shapes use a sliding clip rect.
+- **Settings panel:** a ⚙ popover (`controls`, on by default) that live-tunes
+  Shape/Curve/Smoothing/Pad/Bins/Height/Direction, **showing only the controls relevant to the
+  chosen shape**. Optional **`persistKey`** remembers tuned params in `localStorage`; every change
+  also fires a `scent` event.
 
-See [d3-api-style.md](./d3-api-style.md) for the idiom, and
-[history-direct-manipulation-rangesliders.md](./history-direct-manipulation-rangesliders.md) for the
-Shneiderman/Plaisant dynamic-query lineage that motivates the live, tightly-coupled feedback.
+### Pure helpers (`src/snap.js`, `src/geometry.js`)
 
-## Accessibility (first-class)
-
-Built on **two native `<input type="range">`** (a "lo" and a "hi" thumb) so the control is
-accessible by construction:
-
-- **Keyboard** (free from native inputs, plus our additions): `Tab` focuses each thumb;
-  `←/↓` and `→/↑` nudge by `step`; `PageUp`/`PageDown` by a larger step; `Home`/`End` jump to that
-  thumb's allowed bound. Each thumb is clamped so `lo ≤ hi`.
-- **Screen readers:** each input is announced as a slider with an accessible **name**
-  (`aria-label`, e.g. "Minimum Semanas" / "Maximum Semanas"), `min`/`max`/`now` (native), and a
-  human-readable **`aria-valuetext`** (e.g. "30 weeks" / "1,500 g"). The pair is wrapped in a
-  labelled `role="group"` (e.g. "Semanas range").
-- **Standard HTML inputs:** real form controls — they participate in forms, inherit OS slider
-  styling/high-contrast, respect `prefers-reduced-motion`, and need no custom ARIA-slider
-  reimplementation.
-- **Pointer:** the two range inputs are overlaid on the same track; `pointer-events` is toggled so
-  the thumb nearer the cursor is the grabbable one (the standard accessible dual-range technique).
-  Thumbs are styled to read as handles on the axis; the track is transparent so the axis line and
-  ticks show through.
-- **Visible focus** ring on the focused thumb; hit targets ≥ 24px (touch/WCAG target size).
-- **Vertical orientation:** native vertical range via CSS `writing-mode: vertical-lr` (modern
-  Chromium/Firefox/Safari); horizontal is the primary, fully-supported path. (Noted caveat below.)
-
-Maps directly onto the direct-manipulation best practices in
-[history-direct-manipulation-rangesliders.md](./history-direct-manipulation-rangesliders.md):
-immediate feedback, reversibility, visible state, tight coupling — now also operable without a mouse.
-
-**Tradeoff vs the old brush approach:** native inputs don't natively support dragging the *range
-body* to pan (DM "Principle 3"). Options: (a) v1 = move both bounds via keyboard / two drags;
-(b) add an optional pointer-only drag-to-pan region (mouse enhancement, not required for a11y).
-Recommend (a) now, (b) later.
+- `snapRange([lo,hi],domain,step)` / `snapValue(v,domain,step)` — order, clamp to domain, snap to
+  step; domain endpoints stay reachable when step doesn't divide the span. No d3/DOM deps.
+- `axisGeometry(...)` — pure value→pixel mapping for the handles. No DOM deps.
 
 ## Packaging
 
-- ESM source (`type: module`), `main`/`module` → `src/index.js`; `unpkg`/`jsdelivr` → minified UMD.
-- `exports` targets all start with `./` (avoids the `ERR_INVALID_PACKAGE_TARGET` trap).
-- `d3-*` are runtime deps, **externalized** in the Rollup UMD build (merge into global `d3`).
-- `reactive-widget-helper` is an **optional peer**.
-- `"sideEffects": false` for tree-shaking.
+- ESM source (`type: module`). `main`/`module` → `src/index.js` (core).
+- **`exports`:** `.` → core (with a `umd` condition → the dist bundle), `./input` → the widget, plus
+  `./package.json`. All targets are `./`-prefixed (avoids the `ERR_INVALID_PACKAGE_TARGET` trap).
+- The **UMD bundle** (`dist/*.min.js`, `unpkg`/`jsdelivr`) is built from the **core** entry and
+  expects a shared global `d3` (d3-* externalized and merged into `d3`). Core-only by design; the
+  widget ships as ESM only.
+- `reactive-widget-helper` is an **optional peer** — only `./input` imports it; the core entry never
+  does. `d3-shape` + `fast-kde` are runtime deps used solely by the widget.
+- `"sideEffects": false` is safe: styles inject at call time (`injectStyles()`), not at module load.
 
 ## Testing
 
-- `node --test` for `snap` (pure).
-- Brush gestures need *trusted* events, so render + drag is verified in a browser (Playwright) when
-  adopted in a host app / demo page — not jsdom.
+- `node --test`: `test/snap.test.js` + `test/geometry.test.js` — **14 tests**, covering the pure
+  helpers.
+- The DOM/brush layers (`input.js`, `zoomableAxis.js`) need *trusted* events, so they are verified
+  in a browser against the `examples/` pages rather than jsdom.
 
-## Status / next steps
+## Examples (`examples/`)
 
-1. ✅ Core component, reactive wrapper, pure helper, packaging scaffold.
-2. ⏳ Browser verification (render + real drag → emits data-space range; reset; orientation).
-3. ⏳ Rollup build + `npm pack` sanity.
-4. ⏳ Observable notebook demo (reactivewidgets.org entry).
-5. ⏳ Adopt in Explorador Canguro: replace the overlay sliders; ideally have TimeWidget expose its
-   x/y scales (and optionally suppress its own axes) so the zoomable axes align by shared scale.
+- **`demo.html`** — penguins scatterplot: live **zoom**, **dynamic-query filtering** (top+right
+  axes), and a filter **synced to a 2D `d3-brush`** (the reactivewidgets pattern — axes ⇄ brush as
+  two views of one selection). Uses CDN modules (esm.sh).
+- **`test-local.html`** — offline smoke test (local `node_modules` + a small
+  `reactive-widget-helper` stub) exercising both orientations + scent.
 
-## Status (2026-06-19) — good version reached, NOT published
+## Possible next steps
 
-All handoff tasks complete and committed. 13/13 tests passing.
+- TypeScript types (`.d.ts`) and richer `exports` conditions (`import`/`require`/`types`).
+- Automated tests for the widget/brush layers (jsdom or Playwright in CI).
+- Observable notebook / reactivewidgets.org entry.
+- Adopt in a host app (e.g. replace overlay sliders where the chart already exposes its scales).
 
-### What's implemented
-
-- Native `<input type="range">` dual-handle accessible axis (keyboard / screen-reader / ARIA)
-- Both orientations (horizontal + vertical via `rotate(-90)`)
-- Drag-to-pan on the selection band (verified in browser)
-- **D-shape SVG handles**: flat edge = value-marker line; bump faces outward
-  - Bottom axis: left bump (lo) / right bump (hi)
-  - Left axis: down bump (lo) / up bump (hi)
-  - Separate `za-handles-svg` layer (z-index 3) so handles are never occluded by scent
-  - `focus-within` z-order so active axis stays on top of siblings
-- **Value badges** outside the chart (below tick labels for bottom axis, left for left axis)
-  - 24px offset from axis clears standard d3 tick+label zone
-  - x/y clamped so badge never overflows component bounds at domain extremes
-- **Scented widget** (`scent: { values, type, bins }`):
-  - `type: "histogram"` — color-coded bars (grey = out of selection, accent = in-selection)
-  - `type: "violin"` — smooth KDE via `fast-kde`; two-tone clip coloring
-  - `scent.style: "kde" | "bars"` selects violin rendering style
-  - Thin selection band + faint hit-zone when scent is shown
-- **Demo** (`examples/demo.html`): penguins scatterplot with flush-aligned scented axes,
-  plus "without scent" and "plain range sliders" baseline variants
-
-### Remaining open decisions
-
-1. Package name `@john-guerra/d3-zoomable-axis` — OK?
-2. Live-drag event: `input` (chosen, DOM/reactive cohesion) vs `change`
-3. ~~d3-brush vs hand-rolled~~ → **resolved: native `<input type="range">`**
-4. Ship a minimal default stylesheet, or leave unstyled with documented classes?
-5. Drag-to-pan discoverability: add a hover state on the band? (currently: thin visible line
-   shows selection; faint translucent rect is the drag hit zone)
-6. Vertical orientation caveats (native vertical range has browser-specific quirks) — document?
-
-### Not yet done (v1+ or never)
-
-- `npm pack` / `npm publish` (intentionally deferred)
-- Observable notebook demo
-- Adopt in Explorador Canguro
+See [d3-api-style.md](./d3-api-style.md) for the reusable-component idiom, and
+[history-direct-manipulation-rangesliders.md](./history-direct-manipulation-rangesliders.md) for the
+Shneiderman/Plaisant dynamic-query lineage that motivates the live, tightly-coupled feedback.
