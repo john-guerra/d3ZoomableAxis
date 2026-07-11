@@ -188,6 +188,8 @@
     .code-live .mount { overflow-x: auto; }
     .code-live .rd { font-family: var(--mono); font-size: 12.5px; color: var(--muted); margin: 12px 0 0; }
     .code-live .rd b { color: var(--teal-text); }
+    .code-note { font-family: var(--mono); font-size: 11.5px; color: var(--muted); line-height: 1.55; margin: 14px 0 0; }
+    .code-note code { color: var(--ink); }
     /* The core is d3-brush based: its resize handles are invisible by default.
        Style the selection + handles so the rendered core shows knobs too. */
     #coreSvg .selection { fill: var(--band); stroke: var(--teal); stroke-opacity: .85; }
@@ -366,6 +368,9 @@ d3.<span class="f">select</span>(<span class="s">"svg g"</span>).<span class="f"
             <div class="mount"><svg id="coreSvg" class="coreSvg"></svg></div>
             <p class="rd" id="coreRd">—</p>
           </div>
+          <p class="code-note">Core is <code>d3-brush</code>-based — its resize handles are invisible
+            hit-areas by default; style <code>.selection</code> / <code>.handle</code> to draw them.
+            The widget ships visible, accessible handles.</p>
         </div>
 
         <div class="code-card">

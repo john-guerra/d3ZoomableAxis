@@ -88,6 +88,10 @@ Factories: `zoomableAxisBottom`, `zoomableAxisTop`, `zoomableAxisLeft`, `zoomabl
 in data space (inverted from pixels, snapped to `step`). Imperative `slider.move(g, [lo,hi])`
 sets and emits; `slider.value([lo,hi])` sets silently.
 
+> **Handles:** the core is `d3-brush`-based, so its resize handles are invisible hit-areas by
+> default — only the selection is drawn. Style `.selection` / `.handle` (or set `.handleSize(...)`)
+> to draw them. The widget layer below ships visible, accessible handles out of the box.
+
 ## Reactive widget (Observable / reactivewidgets.org)
 
 ```js
