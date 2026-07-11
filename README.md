@@ -5,6 +5,11 @@
 `[lo, hi]` sub-range, which it emits in **data space**. One scale, one element — the axis *is*
 the zoom control, so it lines up with your chart by construction (no pixel-offset hacks).
 
+[![d3-zoomable-axis — drag the axis handles to zoom a penguins scatterplot](docs/assets/demo.gif)](https://john-guerra.github.io/d3ZoomableAxis/)
+
+**▶ [Live interactive demo](https://john-guerra.github.io/d3ZoomableAxis/)** — drag the axis
+handles to zoom a penguins scatterplot in your browser.
+
 > npm: `@john-guerra/d3-zoomable-axis` · status: **early (0.0.x)**
 
 ## Two entry points
@@ -129,7 +134,9 @@ zoomableAxisInput([170, 235], {
 (the ⚙ panel — on by default; `false` to hide), and `persistKey` (remember tuned params in
 `localStorage`). Panel edits also fire a `scent` event (`el.on("scent", params => …)`).
 
-See [`examples/demo.html`](./examples/demo.html) for live zoom, dynamic-query filtering, and a
+See it live: **[john-guerra.github.io/d3ZoomableAxis](https://john-guerra.github.io/d3ZoomableAxis/)**
+(a landing page + demo that import the published npm package from a CDN). The source is in
+[`examples/demo.html`](./examples/demo.html) — live zoom, dynamic-query filtering, and a
 brush-synced example (and [`examples/test-local.html`](./examples/test-local.html) for an
 offline smoke test).
 
@@ -142,4 +149,4 @@ offline smoke test).
 
 ## License
 
-ISC © John Alexis Guerra Gómez
+MIT © [John Alexis Guerra Gómez](https://johnguerra.co)
