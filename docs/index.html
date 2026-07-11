@@ -104,6 +104,7 @@
 
     /* ── Hero live: updating-axis zoom chart + the real control ── */
     .hero-live { margin: 6px 0 34px; max-width: 604px; overflow-x: auto; }
+    .hero-plot { position: relative; }
     .zoomchart { display: block; overflow: visible; }
     .zoomchart .area { fill: var(--band); }
     .zoomchart .line { fill: none; stroke: var(--teal); stroke-width: 2; stroke-linejoin: round; }
@@ -111,7 +112,6 @@
     .zoomchart .tick line { stroke: var(--line); stroke-width: 1; }
     .zoomchart .tick text { fill: var(--muted); font-family: var(--mono); font-size: 10.5px; }
     .zoomchart .frame { fill: none; stroke: var(--line); stroke-width: 1; }
-    .hero-control { margin-top: 2px; }
     .hero-readout { font-family: var(--mono); font-size: 13px; color: var(--muted); margin: 12px 0 0; }
     .hero-readout b { color: var(--teal-text); }
     .hero-readout .hint { color: var(--muted); opacity: .8; }
@@ -188,7 +188,10 @@
     .code-live .mount { overflow-x: auto; }
     .code-live .rd { font-family: var(--mono); font-size: 12.5px; color: var(--muted); margin: 12px 0 0; }
     .code-live .rd b { color: var(--teal-text); }
-    .coreSvg .domain, .coreSvg path { }
+    /* The core is d3-brush based: its resize handles are invisible by default.
+       Style the selection + handles so the rendered core shows knobs too. */
+    #coreSvg .selection { fill: var(--band); stroke: var(--teal); stroke-opacity: .85; }
+    #coreSvg .handle { fill: var(--orange); rx: 3px; }
 
     /* ── Reactive ── */
     .reactive { background: var(--panel); border: 1.5px solid var(--line); border-radius: 14px; padding: 30px; box-shadow: var(--shadow); }
@@ -229,12 +232,13 @@
       <p class="eyebrow">d3 component · reactive widget</p>
       <h1>The axis <span class="zoom">is</span> the zoom&nbsp;control.</h1>
       <p class="lede">Combine a d3 axis with a dual-handle range slider in <b>one element</b>.
-        Drag the handles below — the chart zooms into the window and its axis re-labels live,
-        the selection emitted in <b>data space</b>.</p>
+        Drag the axis on the chart's edge — it zooms into that window while the scale above
+        re-labels live, the selection emitted in <b>data space</b>.</p>
 
       <div class="hero-live">
-        <svg id="zoomChart" class="zoomchart" role="img" aria-label="A small area chart that zooms as you drag the axis below it"></svg>
-        <div id="heroControl" class="hero-control"></div>
+        <div id="heroPlot" class="hero-plot">
+          <svg id="zoomChart" class="zoomchart" role="img" aria-label="A small area chart that zooms as you drag its axis"></svg>
+        </div>
         <p class="hero-readout" id="heroOut">—</p>
       </div>
 
@@ -462,31 +466,33 @@ el.<span class="f">addEventListener</span>(<span class="s">"input"</span>, () =>
     };
     const AXMARGIN = 22, AXTHICK = 44, AXLINE = AXMARGIN + AXTHICK / 2;
 
-    // ---- 1. HERO: updating-axis zoom chart + real control --------------
+    // ---- 1. HERO: chart with an updating axisTop; the zoomable axis is
+    //         attached flush to the chart's bottom edge (a real bottom axis).
     try {
-      const W = 540, H = 78, PAD = 6;
+      const W = 520, H = 96, TOPAX = 22, PAD = 5;
+      const plotLeft = AXMARGIN, plotTop = TOPAX, plotBottom = plotTop + H;
       const data = Array.from({ length: 240 }, (_, i) => {
         const x = (i / 239) * 100;
         const y = Math.sin(x / 6.5) + 0.55 * Math.sin(x / 2.2 + 1) + 0.3 * Math.sin(x / 0.85 + 0.5);
         return { x, y };
       });
       const yext = [Math.min(...data.map(d => d.y)), Math.max(...data.map(d => d.y))];
-      const sx = scaleLinear().range([0, W]);
-      const sy = scaleLinear().domain([yext[0] - 0.2, yext[1] + 0.2]).range([H - PAD, PAD]);
+      const sx = scaleLinear().range([plotLeft, plotLeft + W]);
+      const sy = scaleLinear().domain([yext[0] - 0.2, yext[1] + 0.2]).range([plotBottom - PAD, plotTop + PAD]);
 
-      const svg = select("#zoomChart").attr("width", W).attr("height", H + 20)
-        .style("margin-left", AXMARGIN + "px");
-      svg.append("rect").attr("class", "frame").attr("x", 0).attr("y", 0).attr("width", W).attr("height", H);
+      const svg = select("#zoomChart").attr("width", plotLeft + W + 12).attr("height", plotBottom + 4);
+      svg.append("rect").attr("class", "frame").attr("x", plotLeft).attr("y", plotTop).attr("width", W).attr("height", H);
       const areaP = svg.append("path").attr("class", "area");
       const lineP = svg.append("path").attr("class", "line");
-      const axisG = svg.append("g").attr("class", "hero-axis").attr("transform", `translate(0,${H})`);
-      axisG.append("line").attr("class", "axis-base").attr("x1", 0).attr("x2", W);
+      // updating value axis on TOP of the chart (ticks + labels above the plot)
+      const axisG = svg.append("g").attr("class", "hero-axis").attr("transform", `translate(0,${plotTop})`);
+      axisG.append("line").attr("class", "axis-base").attr("x1", plotLeft).attr("x2", plotLeft + W);
 
       const linePath = (d) => d.map((p, i) => (i ? "L" : "M") + sx(p.x).toFixed(1) + " " + sy(p.y).toFixed(1)).join("");
       const areaPath = (d) => {
         if (!d.length) return "";
         const top = d.map((p, i) => (i ? "L" : "M") + sx(p.x).toFixed(1) + " " + sy(p.y).toFixed(1)).join("");
-        return top + `L${sx(d[d.length - 1].x).toFixed(1)} ${H}L${sx(d[0].x).toFixed(1)} ${H}Z`;
+        return top + `L${sx(d[d.length - 1].x).toFixed(1)} ${plotBottom}L${sx(d[0].x).toFixed(1)} ${plotBottom}Z`;
       };
       function draw(lo, hi) {
         sx.domain([lo, hi]);
@@ -496,16 +502,22 @@ el.<span class="f">addEventListener</span>(<span class="s">"input"</span>, () =>
         const t = axisG.selectAll("g.tick").data(niceTicks(lo, hi, 6), d => d);
         t.exit().remove();
         const te = t.enter().append("g").attr("class", "tick");
-        te.append("line").attr("y1", 0).attr("y2", 5);
-        te.append("text").attr("y", 15).attr("text-anchor", "middle");
-        te.merge(t).attr("transform", d => `translate(${sx(d).toFixed(1)},0)`)
-          .select("text").text(d => d);
+        te.append("line").attr("y1", 0).attr("y2", -5);
+        te.append("text").attr("y", -9).attr("text-anchor", "middle");
+        te.merge(t).attr("transform", d => `translate(${sx(d).toFixed(1)},0)`).select("text").text(d => d);
       }
 
+      // The zoomable axis sits flush against the chart's bottom edge — a real axis.
       const control = zoomableAxisInput(scaleLinear().domain([0, 100]), {
-        orient: "bottom", length: W, value: [30, 68], step: 1, label: "zoom", units: "",
+        orient: "bottom", length: W, value: [30, 68], step: 1, label: "", units: "",
       });
-      document.getElementById("heroControl").appendChild(control);
+      control.style.position = "absolute";
+      control.style.left = (plotLeft - AXMARGIN) + "px";
+      control.style.top = (plotBottom - AXLINE) + "px";
+      const plot = document.getElementById("heroPlot");
+      plot.style.height = (plotBottom + 58) + "px";
+      plot.appendChild(control);
+
       const out = document.getElementById("heroOut");
       const update = () => {
         const [lo, hi] = control.value; draw(lo, hi);
