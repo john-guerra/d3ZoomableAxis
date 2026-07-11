@@ -22,3 +22,4 @@ export {
 } from "./zoomableAxis.js";
 
 export { snapRange, snapValue } from "./snap.js";
+export { applyNice } from "./nice.js";

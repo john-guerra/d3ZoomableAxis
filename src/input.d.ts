@@ -53,6 +53,12 @@ export interface ZoomableAxisInputOptions {
   /** Type of the double-click inline editor. */
   inputType?: "number" | "date" | "time" | "datetime-local";
   ticks?: number | any[];
+  /**
+   * Round the domain outward to human-friendly bounds (d3 `scale.nice`) so the
+   * end ticks and KDE clip bounds land on round values. Opt-in (adds edge
+   * padding): `true` (d3 default), a step count, or a d3 time interval.
+   */
+  nice?: boolean | number | any;
   scent?: ScentOptions;
 }
 

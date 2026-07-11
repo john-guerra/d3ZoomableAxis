@@ -15,6 +15,7 @@ import {
 import ReactiveWidget from "reactive-widget-helper";
 import { density1d } from "fast-kde";
 import { snapRange } from "./snap.js";
+import { applyNice } from "./nice.js";
 import { axisGeometry } from "./geometry.js";
 
 const AXIS = { bottom: axisBottom, top: axisTop, left: axisLeft, right: axisRight };
@@ -242,6 +243,12 @@ export function zoomableAxisInput(scaleOrDomain, {
   // d3 time interval. null keeps d3's default (~10) — too dense for a compact
   // sparkline, so callers there should pass a small count.
   ticks = null,
+  // Round the domain OUTWARD to human-friendly bounds (d3 scale.nice) so the
+  // end ticks — and the scented-KDE clip bounds — land on round values instead
+  // of a raw data min/max. Opt-in because it adds a little empty padding at each
+  // end. false (default) | true (d3 default) | number (≈step count) | d3 time
+  // interval. Ignored for scales without .nice() (ordinal/band).
+  nice = false,
   // Native input type for the double-click "type an exact value" editor:
   // "number" (default) or a temporal type ("date" | "datetime-local" | "time")
   // when the axis represents time. Drives value↔string conversion below.
@@ -280,6 +287,11 @@ export function zoomableAxisInput(scaleOrDomain, {
   const axisCross = orient === "top" || orient === "right" ? margin : margin + thickness / 2;
   const scale = (typeof scaleOrDomain === "function" ? scaleOrDomain.copy() : scaleLinear().domain(scaleOrDomain))
     .range(horizontal ? [0, length] : [length, 0]);
+  // Optionally nice the domain BEFORE reading dMin/dMax below, so value snapping,
+  // the native input min/max, the axis ticks, and the KDE clip bounds all derive
+  // from the same rounded domain. We copied the scale above, so the caller's is
+  // untouched.
+  applyNice(scale, nice);
   // Numeric domain bounds. scale.domain() returns Date objects for a d3 time
   // scale; coerce so arithmetic (snapRange, drag deltas, native input min/max)
   // stays numeric instead of concatenating strings into NaN. The axis (drawn

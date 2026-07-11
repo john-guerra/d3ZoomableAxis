@@ -67,3 +67,11 @@ export function zoomableAxisLeft(scale: any): ZoomableAxis;
 export function snapRange(range: ZoomRange, domain: number[], step: number): ZoomRange;
 /** Clamp and snap a single value to `step` within `domain`. */
 export function snapValue(v: number, domain: number[], step: number): number;
+
+/**
+ * Round a continuous scale's domain outward to human-friendly bounds via d3
+ * `scale.nice`. `nice`: `true` (d3 default), a step count, or a d3 time
+ * interval. Falsy, or a scale without `.nice()`, returns it untouched. Mutates
+ * and returns the same scale.
+ */
+export function applyNice<S>(scale: S, nice?: boolean | number | any): S;
