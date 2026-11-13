@@ -65,7 +65,7 @@ export interface ZoomableAxisInputOptions {
    * (default) = the tick side, away from the plot; "in" = the opposite side.
    */
   badgeSide?: "out" | "in";
-  /** Stem length in px past the handle tick's half-length (default 14); badges sit at its tip. */
+  /** Stem length in px past the handle tick's half-length (default 14; negatives clamp to 0, non-numbers use 14); badges sit at its tip. */
   stemLength?: number;
 }
 

@@ -16,7 +16,7 @@ import ReactiveWidget from "reactive-widget-helper";
 import { density1d } from "fast-kde";
 import { snapRange } from "./snap.js";
 import { applyNice } from "./nice.js";
-import { axisGeometry } from "./geometry.js";
+import { axisGeometry, badgeDirection, resolveStemLength } from "./geometry.js";
 
 const AXIS = { bottom: axisBottom, top: axisTop, left: axisLeft, right: axisRight };
 
@@ -359,9 +359,12 @@ export function zoomableAxisInput(scaleOrDomain, {
   // render above the scented distribution and above sibling axis components.
   // pointer-events:none — interaction falls through to the invisible native thumbs.
   const HR = 10; // half-length of the tick line (px, in axisG local coordinate space)
-  const STEM = stemLength; // length of the stem from tick edge to badge (px)
-  // +1 = stems/badges on the tick side ("out"), −1 = the other side ("in").
-  const badgeSign = badgeSide === "in" ? -1 : 1;
+  const STEM = resolveStemLength(stemLength); // length of the stem from tick edge to badge (px)
+  if (badgeSide !== "in" && badgeSide !== "out") {
+    console.warn(`zoomableAxisInput: unknown badgeSide ${JSON.stringify(badgeSide)}; using "out".`);
+  }
+  // Cross-axis direction of stems and badges (+1 down/right, −1 up/left).
+  const badgeDir = badgeDirection(orient, badgeSide);
   const handlesSvg = container.append("svg")
     .attr("class", "za-handles-svg").attr("aria-hidden", "true")
     .attr("width", el.style.width).attr("height", el.style.height);
@@ -409,11 +412,11 @@ export function zoomableAxisInput(scaleOrDomain, {
     let tx1, ty1, tx2, ty2, sx1, sy1, sx2, sy2;
     if (horizontal) {
       tx1 = px; ty1 = -HR; tx2 = px; ty2 = HR;
-      const outY = (orient === "bottom" ? 1 : -1) * badgeSign;
+      const outY = badgeDir;
       sx1 = px; sy1 = outY * HR; sx2 = px; sy2 = outY * (HR + STEM);
     } else {
       tx1 = -HR; ty1 = px; tx2 = HR; ty2 = px;
-      const outX = (orient === "left" ? -1 : 1) * badgeSign;
+      const outX = badgeDir;
       sx1 = outX * HR; sy1 = px; sx2 = outX * (HR + STEM); sy2 = px;
     }
     handleEl.select(".za-handle-tick").attr("x1", tx1).attr("y1", ty1).attr("x2", tx2).attr("y2", ty2);
@@ -648,7 +651,7 @@ export function zoomableAxisInput(scaleOrDomain, {
     labelLo.textContent = fmt(val[0]);
     labelHi.textContent = fmt(val[1]);
     if (horizontal) {
-      const outDir = (orient === "bottom" ? 1 : -1) * badgeSign;
+      const outDir = badgeDir;
       const ty = `${axisCross + outDir * (HR + STEM)}px`;
       const xfm = outDir > 0 ? "translate(-50%, 0)" : "translate(-50%, -100%)";
       const loW = labelLo.offsetWidth || 50;
@@ -671,7 +674,7 @@ export function zoomableAxisInput(scaleOrDomain, {
       labelLo.style.left = `${loC}px`; labelLo.style.top = ty;
       labelHi.style.left = `${hiC}px`; labelHi.style.top = ty;
     } else {
-      const outDir = (orient === "left" ? -1 : 1) * badgeSign;
+      const outDir = badgeDir;
       const tx = `${axisCross + outDir * (HR + STEM)}px`;
       const xfm = outDir < 0 ? "translate(-100%, -50%)" : "translate(0, -50%)";
       const containerH = length + margin * 2;
