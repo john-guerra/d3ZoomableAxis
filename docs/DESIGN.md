@@ -62,6 +62,8 @@ standard form controls, clamped so `lo ≤ hi`. Pointer interaction is layered o
   grab target), drawn in an SVG layer above the scent.
 - **Value badges:** a pill at each stem tip showing the formatted value — **draggable**, and
   **double-click to edit** via an inline native input (`inputType`: `number`/`date`/`time`/`datetime-local`).
+  Stems and badges sit on the tick side by default (`badgeSide: "out"`); `badgeSide: "in"` moves
+  them to the other side of the axis line, and `stemLength` (default 14 px) sets how far out they go.
 - **Drag-to-pan:** dragging the band between the handles moves the whole window; the outward knobs
   resize the ends.
 - **Orientation-aware placement** (bottom/top/left/right) via an `axisCross` offset, so handles,

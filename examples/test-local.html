@@ -42,6 +42,11 @@
   <div id="wrap"></div>
   <p class="out" id="out">—</p>
 
+  <h2>Badges above a bottom axis (badgeSide "in", stemLength 6)</h2>
+  <p>Ticks below the line, histogram bars rising from it (scent direction "in"), and the handles' stems and badges above it, with a short stem.</p>
+  <div id="wrap3" style="position:relative;height:110px;"></div>
+  <p class="out" id="out3">—</p>
+
   <h2>Vertical left axis</h2>
   <div id="wrap2" style="position:relative;height:300px;"></div>
   <p class="out" id="out2">—</p>
@@ -75,6 +80,20 @@
     document.getElementById("wrap").appendChild(xAxis);
     xAxis.addEventListener("input", () => {
       document.getElementById("out").textContent = `x = [${xAxis.value.map(v=>v.toFixed(1))}]`;
+    });
+
+    // ── Bottom axis, badges "in" (above the line), short stem ────────────────
+    const inAxis = zoomableAxisInput(scaleLinear().domain(xDomain), {
+      orient: "bottom", step: 1, length: plotW, value: [20, 70], label: "Value", units: "u",
+      thickness: 60, badgeSide: "in", stemLength: 6,
+      scent: { values: sample, type: "histogram", bins: 28, direction: "in", size: 40 },
+    });
+    inAxis.style.position = "absolute";
+    inAxis.style.left = `${AXMARGIN}px`;
+    inAxis.style.top = `0px`;
+    document.getElementById("wrap3").appendChild(inAxis);
+    inAxis.addEventListener("input", () => {
+      document.getElementById("out3").textContent = `x = [${inAxis.value.map(v=>v.toFixed(1))}]`;
     });
 
     // ── Vertical axis ────────────────────────────────────────────────────────

@@ -277,6 +277,14 @@ export function zoomableAxisInput(scaleOrDomain, {
   //                  event ({type,curve,adjust,pad,bins,size}) via .on("scent", …),
   //                  so a consumer can wire any other store instead.
   scent = null,
+  // Which side of the axis line the handles' stems and the value badges sit on.
+  // "out" (default): the tick side, away from the plot (bottom↓ top↑ left← right→).
+  // "in": the opposite side (bottom↑ top↓ left→ right←), leaving the tick side to
+  // the tick labels alone.
+  badgeSide = "out",
+  // Length (px) of each handle's stem past the tick's half-length; the badges sit
+  // at the stem tip, so they follow it. Default 14.
+  stemLength = 14,
 } = {}) {
   const hasScent = !!(scent && scent.values && scent.values.length);
   injectStyles();
@@ -351,7 +359,9 @@ export function zoomableAxisInput(scaleOrDomain, {
   // render above the scented distribution and above sibling axis components.
   // pointer-events:none — interaction falls through to the invisible native thumbs.
   const HR = 10; // half-length of the tick line (px, in axisG local coordinate space)
-  const STEM = 14; // length of the stem from tick edge to badge (px)
+  const STEM = stemLength; // length of the stem from tick edge to badge (px)
+  // +1 = stems/badges on the tick side ("out"), −1 = the other side ("in").
+  const badgeSign = badgeSide === "in" ? -1 : 1;
   const handlesSvg = container.append("svg")
     .attr("class", "za-handles-svg").attr("aria-hidden", "true")
     .attr("width", el.style.width).attr("height", el.style.height);
@@ -389,7 +399,8 @@ export function zoomableAxisInput(scaleOrDomain, {
   function updateHandleEl(handleEl, px, which) {
     // Musical-note / p-shape: a tick line (value marker) + a stem reaching toward
     // the badge outside the chart area. Both lo and hi stems point outward (away
-    // from the chart) in the same direction for a given orient.
+    // from the chart) in the same direction for a given orient. badgeSide "in"
+    // flips them to the other side of the axis line.
     //
     //   bottom axis:  tick vertical at x=px; stem goes DOWN  (positive y in SVG)
     //   top axis:     tick vertical at x=px; stem goes UP    (negative y)
@@ -398,11 +409,11 @@ export function zoomableAxisInput(scaleOrDomain, {
     let tx1, ty1, tx2, ty2, sx1, sy1, sx2, sy2;
     if (horizontal) {
       tx1 = px; ty1 = -HR; tx2 = px; ty2 = HR;
-      const outY = orient === "bottom" ? 1 : -1;
+      const outY = (orient === "bottom" ? 1 : -1) * badgeSign;
       sx1 = px; sy1 = outY * HR; sx2 = px; sy2 = outY * (HR + STEM);
     } else {
       tx1 = -HR; ty1 = px; tx2 = HR; ty2 = px;
-      const outX = orient === "left" ? -1 : 1;
+      const outX = (orient === "left" ? -1 : 1) * badgeSign;
       sx1 = outX * HR; sy1 = px; sx2 = outX * (HR + STEM); sy2 = px;
     }
     handleEl.select(".za-handle-tick").attr("x1", tx1).attr("y1", ty1).attr("x2", tx2).attr("y2", ty2);
@@ -637,7 +648,7 @@ export function zoomableAxisInput(scaleOrDomain, {
     labelLo.textContent = fmt(val[0]);
     labelHi.textContent = fmt(val[1]);
     if (horizontal) {
-      const outDir = orient === "bottom" ? 1 : -1;
+      const outDir = (orient === "bottom" ? 1 : -1) * badgeSign;
       const ty = `${axisCross + outDir * (HR + STEM)}px`;
       const xfm = outDir > 0 ? "translate(-50%, 0)" : "translate(-50%, -100%)";
       const loW = labelLo.offsetWidth || 50;
@@ -660,7 +671,7 @@ export function zoomableAxisInput(scaleOrDomain, {
       labelLo.style.left = `${loC}px`; labelLo.style.top = ty;
       labelHi.style.left = `${hiC}px`; labelHi.style.top = ty;
     } else {
-      const outDir = orient === "left" ? -1 : 1;
+      const outDir = (orient === "left" ? -1 : 1) * badgeSign;
       const tx = `${axisCross + outDir * (HR + STEM)}px`;
       const xfm = outDir < 0 ? "translate(-100%, -50%)" : "translate(0, -50%)";
       const containerH = length + margin * 2;

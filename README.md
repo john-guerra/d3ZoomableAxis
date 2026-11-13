@@ -110,8 +110,11 @@ Drag a handle to resize an end, drag the band between the handles to **pan** the
 keyboard-focusable native slider.
 
 Key options: `orient`, `step`, `length`, `value`, `label`, `units`, `format`, `inputType`
-(`"number"` | `"date"` | `"time"` | `"datetime-local"`), `ticks`, `thickness`, `margin`, and
-`scent` (below). Events: `input` (DOM, on the element) plus `start` / `input` / `end` / `scent`
+(`"number"` | `"date"` | `"time"` | `"datetime-local"`), `ticks`, `thickness`, `margin`,
+`scent` (below), `badgeSide` (`"out"` | `"in"`; default `"out"` puts the handles' stems and the
+value badges on the tick side, away from the plot; `"in"` puts them on the other side of the axis
+line), and `stemLength` (px past the handle tick, default `14`; the badges sit at the stem tip).
+Events: `input` (DOM, on the element) plus `start` / `input` / `end` / `scent`
 via `el.on(...)`.
 
 ### Scented distribution
